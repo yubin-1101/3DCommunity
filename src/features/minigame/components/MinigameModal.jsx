@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './MinigameModal.css';
 import ProfileAvatar from '../../../components/ProfileAvatar';
 import { FaTimes, FaPlus, FaGamepad, FaUsers, FaCrown, FaLock, FaDoorOpen, FaComments, FaPaperPlane } from 'react-icons/fa';
@@ -8,6 +8,7 @@ import AimingGame from './AimingGame';
 import OmokGame from './OmokGame';
 
 function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lobby', initialRoomId = null, gpsLocation = null }) {
+    const hasJoinedInitialRoom = useRef(false); // 초기 방 입장 여부 추적
     const [currentView, setCurrentView] = useState(initialMode === 'create' ? 'create' : 'lobby');
     const [currentRoom, setCurrentRoom] = useState(null);
     const [rooms, setRooms] = useState([]);
@@ -19,6 +20,7 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
     const [pendingRoomId, setPendingRoomId] = useState(initialRoomId);
     const [showRoomSettingsModal, setShowRoomSettingsModal] = useState(false);
     const [roomSettingsForm, setRoomSettingsForm] = useState({ gameType: '', maxPlayers: 2 });
+    const [isJoiningRoom, setIsJoiningRoom] = useState(false); // 중복 입장 방지
     const [roomChatInput, setRoomChatInput] = useState('');
     const [roomChatMessages, setRoomChatMessages] = useState([]);
     const [isSwitchingRole, setIsSwitchingRole] = useState(false);
@@ -87,8 +89,15 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
 
     useEffect(() => {
         if (!minigameService.connected) {
-            minigameService.connect(userProfile?.id || 'guest', userProfile?.username || '게스트');
+            minigameService.connect(userProfile?.id || 'guest', userProfile?.username || '게스트').then(() => {
+                // 연결 성공 후 방 목록 요청
+                minigameService.requestRoomsList();
+            });
+        } else {
+            // 이미 연결되어 있으면 바로 방 목록 요청
+            minigameService.requestRoomsList();
         }
+
         const onRoomsList = (roomsList) => {
             console.log('Received rooms list:', roomsList);
             setRooms(roomsList || []);
@@ -115,7 +124,7 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
             minigameService.off('roomDelete', onRoomDelete);
             window.removeEventListener('beforeunload', handleBeforeUnload);
         };
-    }, [userProfile, currentRoom]);
+    }, []); // 빈 배열로 변경하여 한 번만 실행
 
     useEffect(() => {
         const onRoomUpdate = (roomData) => {
@@ -129,18 +138,23 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
                 return; // 팝업 확인 전까지 방 업데이트 보류
             }
 
-            // 방 목록 업데이트
+            // 방 목록 업데이트 (중복 방지 강화)
             setRooms(prev => {
-                const exists = prev.some(r => r.roomId === roomData.roomId);
+                const existingIndex = prev.findIndex(r => r.roomId === roomData.roomId);
 
                 if (roomData.action === 'delete' || roomData.isDeleted) {
                     // 방 삭제
+                    console.log('Removing room from list:', roomData.roomId);
                     return prev.filter(r => r.roomId !== roomData.roomId);
-                } else if (exists) {
-                    // 기존 방 업데이트
-                    return prev.map(r => r.roomId === roomData.roomId ? roomData : r);
+                } else if (existingIndex !== -1) {
+                    // 기존 방 업데이트 (create 액션이어도 이미 존재하면 업데이트만)
+                    console.log('Updating existing room:', roomData.roomId);
+                    const newRooms = [...prev];
+                    newRooms[existingIndex] = roomData;
+                    return newRooms;
                 } else if (roomData.action === 'create') {
-                    // 새로운 방 추가
+                    // 새로운 방 추가 (존재하지 않을 때만)
+                    console.log('Adding new room to list:', roomData.roomId);
                     return [...prev, roomData];
                 } else {
                     // action이 'create'가 아니고 방이 존재하지 않으면 추가하지 않음
@@ -231,10 +245,12 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
     }, [currentRoom, userProfile]);
 
     useEffect(() => {
-        if (initialRoomId && userProfile?.id) {
+        // 초기 방 ID가 있고, 아직 입장하지 않았고, 사용자 프로필이 있을 때만 입장
+        if (initialRoomId && userProfile?.id && !hasJoinedInitialRoom.current) {
+            hasJoinedInitialRoom.current = true; // 입장 완료 플래그 설정
             minigameService.joinRoom(initialRoomId, userProfile.level || 1, userProfile.selectedProfile?.imagePath || null, userProfile.selectedOutline?.imagePath || null);
         }
-    }, [initialRoomId]); // userProfile 제거하여 중복 입장 방지
+    }, [initialRoomId, userProfile?.id]); // userProfile.id 추가하여 로드 후 실행
 
     // 채팅 메시지 자동 스크롤
     useEffect(() => {
@@ -303,8 +319,19 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
 
     const handleRoomClick = (room) => {
         if (room.isLocked) return alert('비공개 방입니다.');
-        // 방이 가득 차도 관전자로 입장 가능
+        if (isJoiningRoom) return; // 중복 입장 방지
+
+        // 게임 중인 방은 관전자로만 입장 가능 알림
+        if (room.isPlaying) {
+            alert('게임이 진행 중입니다. 관전자로 입장합니다.');
+        }
+
+        setIsJoiningRoom(true);
+        // 게임 중이거나 방이 가득 차면 관전자로 입장
         minigameService.joinRoom(room.roomId, userProfile?.level || 1, userProfile.selectedProfile?.imagePath || null, userProfile.selectedOutline?.imagePath || null);
+
+        // 1초 후 다시 클릭 가능하도록 설정
+        setTimeout(() => setIsJoiningRoom(false), 1000);
     };
     const handleCreateRoom = () => setCurrentView('create');
     const handleCancelCreateRoom = () => setCurrentView('lobby');
@@ -574,17 +601,23 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
                                         {room.isPlaying ? <span className="status-badge playing">게임 중</span> : <span className="status-badge waiting">대기 중</span>}
                                     </div>
                                 </div>
-                                <div className="room-info">
-                                    <div className="room-game"><FaGamepad /><span>{room.gameName}</span></div>
-                                    <div className="room-host"><FaCrown /><span>{room.hostName}</span></div>
-                                    <div className="room-players">
+                                <div className="room-info-horizontal">
+                                    <div className="room-info-item">
+                                        <FaGamepad />
+                                        <span>{room.gameName}</span>
+                                    </div>
+                                    <div className="room-info-divider">|</div>
+                                    <div className="room-info-item">
+                                        <FaCrown />
+                                        <span>{room.hostName}</span>
+                                    </div>
+                                    <div className="room-info-divider">|</div>
+                                    <div className="room-info-item">
                                         <FaUsers />
                                         <span>{room.currentPlayers}/{room.maxPlayers}</span>
-                                        {room.spectators && room.spectators.length > 0 && (
-                                            <span style={{ marginLeft: '8px', color: '#888', fontSize: '12px' }}>
-                                                (관전 {room.spectators.length})
-                                            </span>
-                                        )}
+                                        <span className="spectator-count">
+                                            (관전 {room.spectators?.length || 0})
+                                        </span>
                                     </div>
                                 </div>
                             </div>

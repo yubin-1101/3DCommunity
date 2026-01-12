@@ -236,7 +236,11 @@ public class MinigameController {
             room.setAction("start");
             room.setTimestamp(System.currentTimeMillis());
 
+            // 방에 있는 모든 사람에게 브로드캐스트
             messagingTemplate.convertAndSend("/topic/minigame/room/" + request.getRoomId(), room);
+
+            // 로비에 있는 사람들에게도 방 상태 업데이트 브로드캐스트 (대기중 -> 게임중)
+            messagingTemplate.convertAndSend("/topic/minigame/rooms", room);
         }
     }
 

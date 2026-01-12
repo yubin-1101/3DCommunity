@@ -1,0 +1,27 @@
+# Build output
+build/
+target/
+*.jar
+*.war
+*.ear
+
+# Gradle
+.gradle/
+gradle-wrapper.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test
+test-results/

@@ -7,7 +7,8 @@ COPY settings.gradle .
 COPY lombok.config .
 COPY src src
 RUN chmod +x gradlew
-RUN ./gradlew clean build -x test
+# Gradle 메모리 설정 및 병렬 빌드 비활성화로 안정성 향상
+RUN ./gradlew clean build -x test --no-daemon --no-parallel -Dorg.gradle.jvmargs="-Xmx512m -XX:MaxMetaspaceSize=256m"
 
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
