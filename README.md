@@ -1,5 +1,7 @@
 # 🌐 MetaPlaza - 3D 소셜 메타버스
 
+> **현재 브랜치**: `kim` (활성 개발) | **마지막 업데이트**: 2026-01-09
+
 React, Three.js, Spring Boot를 활용한 3D 소셜 커뮤니티 플랫폼입니다. 가상 공간에서 다른 사용자들과 실시간으로 만나고 소통하며 다양한 활동을 즐길 수 있습니다.
 
 ## ✨ 주요 기능
@@ -38,9 +40,11 @@ React, Three.js, Spring Boot를 활용한 3D 소셜 커뮤니티 플랫폼입니
 - **신고**: 부적절한 게시글/댓글 신고
 
 ### 🎮 미니게임 시스템
-- **게임 로비**: 미니게임 방 목록 조회
+- **게임 로비**: 미니게임 방 목록 조회, 관전자 수 실시간 표시
 - **방 생성**: 사용자가 게임 방 생성 (게임 선택, 인원 설정)
 - **게임 참가**: 다른 사용자가 만든 방에 입장
+- **대기방**: 중복 입장 방지, 참가자 목록 표시
+- **게임 관전**: 진행 중인 게임 관전 기능
 - **게임 초대**: 친구를 게임에 초대
 - **구현된 게임**:
   - 오목 (Omok): 2인 대전
@@ -114,8 +118,8 @@ React, Three.js, Spring Boot를 활용한 3D 소셜 커뮤니티 플랫폼입니
 - **Gradle**: 빌드 툴
 
 ### 배포
-- **Frontend**: Netlify
-- **Backend**: Spring Boot (내장 Tomcat)
+- **Frontend**: Netlify (자동 배포)
+- **Backend**: Render (Docker 컨테이너)
 - **Database**: Supabase PostgreSQL
 
 ## 🚀 설치 및 실행
@@ -189,10 +193,18 @@ npm run build
 netlify deploy --prod
 ```
 
-### 배포 설정
+**배포 설정**:
 - **빌드 명령어**: `npm run build`
 - **배포 디렉토리**: `build`
 - **Node 버전**: 18
+- **환경 변수**: `.env` 파일의 환경 변수를 Netlify 설정에 추가
+
+### Backend 배포 (Render)
+**Dockerfile 기반 배포**:
+- Docker 이미지를 사용하여 Render에 자동 배포
+- `backend/Dockerfile`에서 빌드 및 실행 설정
+- 환경 변수는 Render 대시보드에서 설정
+- PostgreSQL 데이터베이스는 Supabase 연결
 
 ## 📁 프로젝트 구조
 
@@ -255,7 +267,13 @@ MetaPlaza/
 │   │   │   ├── MinigameController.java
 │   │   │   ├── MultiplayerController.java
 │   │   │   ├── ReportController.java
+│   │   │   ├── LikeController.java
+│   │   │   ├── NoticeController.java
+│   │   │   ├── ProfileItemController.java
+│   │   │   ├── UserShopController.java
 │   │   │   ├── AdminController.java
+│   │   │   ├── AdminBoardController.java
+│   │   │   ├── AdminProfileController.java
 │   │   │   └── ...
 │   │   ├── service/            # 비즈니스 로직
 │   │   ├── repository/         # JPA Repository
@@ -331,16 +349,36 @@ MetaPlaza/
 
 ### 결제
 - `POST /api/payment/charge` - Gold Coin 충전 (TossPayments)
+- `POST /api/payment/verify` - 결제 검증
 
 ### 출석 체크
 - `POST /api/attendance/check` - 출석 체크
 - `GET /api/attendance/today` - 오늘 출석 여부
 
+### 좋아요
+- `POST /api/likes/post/{postId}` - 게시글 좋아요
+- `POST /api/likes/comment/{commentId}` - 댓글 좋아요
+- `DELETE /api/likes/post/{postId}` - 게시글 좋아요 취소
+
+### 공지사항
+- `GET /api/notices` - 공지사항 목록
+- `POST /api/notices` - 공지사항 작성 (관리자)
+- `PUT /api/notices/{id}` - 공지사항 수정 (관리자)
+- `DELETE /api/notices/{id}` - 공지사항 삭제 (관리자)
+
+### 미니게임
+- `POST /api/minigame/room/create` - 게임 방 생성
+- `POST /api/minigame/room/join/{roomId}` - 게임 방 입장
+- `POST /api/minigame/room/leave/{roomId}` - 게임 방 나가기
+- `GET /api/minigame/rooms` - 게임 방 목록
+
 ### WebSocket
 - `/app/multiplayer.connect` - 멀티플레이어 접속
 - `/app/multiplayer.move` - 위치 업데이트
 - `/app/chat.send` - 전역 채팅 전송
+- `/app/dm.send` - DM 전송
 - `/app/minigame.*` - 미니게임 이벤트
+- `/app/friend.*` - 친구 관련 이벤트
 
 ## 🎨 주요 기능 상세
 
@@ -360,6 +398,11 @@ MetaPlaza/
 ### 미니게임
 - **오목**: 15x15 보드에서 2인 대전, 5개 연속 배치 시 승리
 - **반응속도 게임**: 신호에 빠르게 반응하여 순위 경쟁
+- **로비 시스템**:
+  - 실시간 방 목록 조회
+  - 관전자 수 표시 (게임 중인 방)
+  - 중복 입장 방지
+  - 대기방에서 참가자 목록 확인
 
 ### 경제 시스템
 - **Silver Coin**: 출석 체크, 게임 보상으로 획득
@@ -380,9 +423,22 @@ MetaPlaza/
 - 그림자 맵 품질 조절 (설정에서 변경 가능)
 
 ### Git 브랜치 전략
-- `main`: 프로덕션 코드
-- `kim`: 현재 개발 브랜치
+- `main`: 프로덕션 코드 (배포용)
+- `kim`: 현재 활성 개발 브랜치 (2025-12-04 기준)
 - `kichan`: 기능 브랜치
+
+**작업 흐름**:
+1. `kim` 브랜치에서 최신 코드 pull
+2. 기능별 `features/` 디렉토리에서 작업
+3. 커밋 및 `kim` 브랜치에 push
+4. 충분한 테스트 후 `main` 브랜치로 병합
+
+**최근 업데이트** (2026-01-09):
+- ✨ feat: 로비에 관전자 수 항상 표시
+- 🐛 fix: 로비 중복 방 표시 문제 해결 및 레이아웃 가로 배치
+- 🐛 fix: 로비 방 목록 출력 및 게임 중 관전자 입장 기능 개선
+- 🐛 fix: 대기방 중복 입장 방지 기능 추가
+- 🚀 fix: Render 배포를 위한 Dockerfile 최적화
 
 ## 📝 라이선스
 
