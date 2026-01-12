@@ -38,6 +38,7 @@ export default function AimingGame({ roomId, isHost, userProfile, players = [], 
   const [scores, setScores] = useState({});
   const [gameStatus, setGameStatus] = useState('playing'); // playing, ended
   const [finalScores, setFinalScores] = useState(null);
+  const [remainingTime, setRemainingTime] = useState(30); // 제한 시간
 
   // Initialize scores for all players
   useEffect(() => {
@@ -84,6 +85,10 @@ export default function AimingGame({ roomId, isHost, userProfile, players = [], 
           }));
           break;
 
+        case 'aimTimer':
+          setRemainingTime(parseInt(evt.payload, 10));
+          break;
+
         case 'gameEnd':
           setGameStatus('ended');
           setFinalScores(evt.payload);
@@ -123,6 +128,10 @@ export default function AimingGame({ roomId, isHost, userProfile, players = [], 
     <div className="aim-game-overlay">
       <div className="aim-game-container">
         <div className="aim-game-header">
+          <div className="aim-game-timer">
+            <div className="timer-icon">⏱️</div>
+            <div className="timer-value">{remainingTime}s</div>
+          </div>
           <SimplePlayerList scores={scores} players={players} userProfile={userProfile} />
         </div>
         <div

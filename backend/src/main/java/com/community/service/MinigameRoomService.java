@@ -355,7 +355,9 @@ public class MinigameRoomService {
      * 게임 시작
      */
     // Aiming Game Constants
-    private static final int WINNING_SCORE = 10;
+    private static final int GAME_DURATION = 30; // 30초 게임
+    private static final int MAX_TARGETS = 3; // 최대 3개 타겟 동시 표시
+    private static final int TARGET_SPAWN_INTERVAL = 2; // 2초마다 타겟 생성 체크
 
     /**
      * 게임 시작
@@ -380,17 +382,58 @@ public class MinigameRoomService {
         startEvent.setTimestamp(System.currentTimeMillis());
         messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", startEvent);
 
-        // [Serial Logic] Start by spawning the FIRST target immediately
+        // 에임 맞추기 게임 로직
         if ("에임 맞추기".equals(room.getGameName())) {
-            // Add slight delay to ensure clients are ready to receive spawn event
+            session.setRemainingSeconds(GAME_DURATION);
+
+            // 초기 타겟 생성 (최대 3개)
             new Thread(() -> {
                 try {
                     Thread.sleep(500);
-                    spawnTarget(roomId);
+                    for (int i = 0; i < MAX_TARGETS; i++) {
+                        spawnTarget(roomId);
+                        Thread.sleep(200); // 타겟 간 약간의 간격
+                    }
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }).start();
+
+            // 주기적으로 타겟 생성 및 타이머 업데이트
+            session.future = scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    GameSession s = sessions.get(roomId);
+                    if (s == null) return;
+
+                    // 타이머 감소
+                    s.decrementRemainingSeconds();
+
+                    // 타이머 업데이트 브로드캐스트
+                    GameEventDto timerEvt = new GameEventDto();
+                    timerEvt.setRoomId(roomId);
+                    timerEvt.setType("aimTimer");
+                    timerEvt.setPayload(String.valueOf(s.getRemainingSeconds()));
+                    timerEvt.setTimestamp(System.currentTimeMillis());
+                    messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", timerEvt);
+
+                    // 타겟 생성 (최대 3개까지)
+                    if (s.getRemainingSeconds() % TARGET_SPAWN_INTERVAL == 0) {
+                        spawnTarget(roomId);
+                    }
+
+                    // 시간 종료 시 게임 종료
+                    if (s.getRemainingSeconds() <= 0) {
+                        if (s.future != null) {
+                            s.future.cancel(false);
+                        }
+                        endGameSession(roomId);
+                    }
+                } catch (Exception e) {
+                    log.error("에임 게임 타이머 에러: roomId={}", roomId, e);
+                }
+            }, 1, 1, TimeUnit.SECONDS);
+
+            log.info("에임 게임 타이머 시작: roomId={}, duration={}s", roomId, GAME_DURATION);
         } else if ("Reaction Race".equals(room.getGameName())) {
             // Reaction Race logic
             startReactionRound(roomId);
@@ -448,8 +491,10 @@ public class MinigameRoomService {
         if (session == null)
             return;
 
-        // Clear existing targets (ensure only one exists)
-        session.activeTargets.clear();
+        // 최대 3개까지만 타겟 생성
+        if (session.activeTargets.size() >= MAX_TARGETS) {
+            return;
+        }
 
         GameTargetDto target = new GameTargetDto();
         target.setId(UUID.randomUUID().toString());
@@ -468,6 +513,7 @@ public class MinigameRoomService {
         evt.setTimestamp(System.currentTimeMillis());
 
         messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", evt);
+        log.info("타겟 생성: roomId={}, targetId={}, 현재 타겟 수={}", roomId, target.getId(), session.activeTargets.size());
     }
 
     private void endGameSession(String roomId) {
@@ -576,15 +622,9 @@ public class MinigameRoomService {
         removed.setTimestamp(System.currentTimeMillis());
         messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", removed);
 
-        // Check Win Condition
-        if (newScore >= WINNING_SCORE) {
-            log.info("Player {} won the game!", playerId);
-            endGameSession(roomId);
-        } else {
-            // Spawn NEXT target immediately for fast paced game
-            log.info("Spawning next target...");
-            spawnTarget(roomId);
-        }
+        // 타겟이 제거되었으므로 새로운 타겟 생성 (최대 3개까지)
+        log.info("타겟 제거 후 새 타겟 생성 시도...");
+        spawnTarget(roomId);
 
         return result;
     }
