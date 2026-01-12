@@ -29,6 +29,7 @@ public class PersonalRoomService {
 
     private final PersonalRoomRepository personalRoomRepository;
     private final RoomFurnitureRepository roomFurnitureRepository;
+    private final ActiveUserService activeUserService;
 
     // 메모리 캐시: roomId -> RoomDto 매핑 (빠른 조회용)
     private final Map<String, RoomDto> activeRoomsCache = new ConcurrentHashMap<>();
@@ -173,13 +174,26 @@ public class PersonalRoomService {
     }
 
     /**
-     * 모든 활성 방 목록 조회
+     * 모든 활성 방 목록 조회 (호스트가 온라인인 방만)
      */
     @Transactional(readOnly = true)
     public List<RoomDto> getAllRooms() {
         // DB에서 최신 데이터 로드
         List<PersonalRoom> rooms = personalRoomRepository.findByIsActiveTrue();
         return rooms.stream()
+                .filter(room -> {
+                    // 호스트가 온라인인 방만 필터링
+                    if (room.getHostId() != null) {
+                        String hostId = String.valueOf(room.getHostId());
+                        boolean isOnline = activeUserService.isUserActive(hostId);
+                        if (!isOnline) {
+                            log.debug("방 {} 필터링됨: 호스트 {}가 오프라인", room.getRoomId(), hostId);
+                        }
+                        return isOnline;
+                    }
+                    // 호스트 ID가 없는 경우 표시 (안전장치)
+                    return true;
+                })
                 .map(this::entityToDto)
                 .collect(Collectors.toList());
     }
@@ -237,7 +251,7 @@ public class PersonalRoomService {
     }
 
     /**
-     * 특정 위치 주변의 방 목록 조회 (GPS 기반)
+     * 특정 위치 주변의 방 목록 조회 (GPS 기반, 호스트가 온라인인 방만)
      */
     @Transactional(readOnly = true)
     public List<RoomDto> getNearbyRooms(double lng, double lat, double radiusKm) {
@@ -245,6 +259,15 @@ public class PersonalRoomService {
         List<RoomDto> nearbyRooms = new ArrayList<>();
         
         for (PersonalRoom room : allRooms) {
+            // 호스트가 온라인인지 확인
+            if (room.getHostId() != null) {
+                String hostId = String.valueOf(room.getHostId());
+                if (!activeUserService.isUserActive(hostId)) {
+                    log.debug("주변 방 {} 필터링됨: 호스트 {}가 오프라인", room.getRoomId(), hostId);
+                    continue;
+                }
+            }
+            
             if (room.getGpsLng() != null && room.getGpsLat() != null) {
                 double distance = calculateDistance(lat, lng, room.getGpsLat(), room.getGpsLng());
                 if (distance <= radiusKm) {

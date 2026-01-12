@@ -19,6 +19,7 @@ class MultiplayerService {
     this.onFriendUpdateCallbacks = [];
     this.onDMMessageCallbacks = [];
     this.onRoomUpdateCallbacks = []; // 방 생성/삭제 콜백 추가
+    this.onRoomListUpdateCallbacks = []; // 방 목록 실시간 업데이트 콜백
     this.onRoomChatCallbacks = []; // 개인 룸 채팅 콜백
     this.pendingRoomChatSubscriptions = new Set(); // roomId set to subscribe on connect if subscribe requested earlier
   }
@@ -109,6 +110,13 @@ class MultiplayerService {
           const data = JSON.parse(message.body);
           console.log('🏠 Room update:', data);
           this.onRoomUpdateCallbacks.forEach(cb => cb?.(data));
+        });
+        
+        // Subscribe to room list updates (방 목록 실시간 동기화)
+        this.client.subscribe('/topic/rooms/list', (message) => {
+          const rooms = JSON.parse(message.body);
+          console.log('📜 방 목록 실시간 업데이트:', rooms.length, 'rooms');
+          this.onRoomListUpdateCallbacks.forEach(cb => cb?.(rooms));
         });
 
         // room chat subscriptions map initialization
@@ -304,6 +312,15 @@ class MultiplayerService {
       this.onRoomUpdateCallbacks.push(callback);
       return () => {
         this.onRoomUpdateCallbacks = this.onRoomUpdateCallbacks.filter(cb => cb !== callback);
+      };
+    }
+  }
+  
+  onRoomListUpdate(callback) {
+    if (callback) {
+      this.onRoomListUpdateCallbacks.push(callback);
+      return () => {
+        this.onRoomListUpdateCallbacks = this.onRoomListUpdateCallbacks.filter(cb => cb !== callback);
       };
     }
   }

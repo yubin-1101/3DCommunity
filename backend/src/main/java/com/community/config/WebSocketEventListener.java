@@ -1,7 +1,9 @@
 package com.community.config;
 
 import com.community.dto.PlayerJoinDto;
+import com.community.dto.RoomDto;
 import com.community.service.ActiveUserService;
+import com.community.service.PersonalRoomService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -11,6 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
+import java.util.List;
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -18,6 +22,7 @@ public class WebSocketEventListener {
 
     private final SimpMessageSendingOperations messagingTemplate;
     private final ActiveUserService activeUserService;
+    private final PersonalRoomService personalRoomService;
 
     @EventListener
     public void handleWebSocketConnectListener(SessionConnectedEvent event) {
@@ -58,6 +63,11 @@ public class WebSocketEventListener {
             // 온라인 인원 수 업데이트 브로드캐스트
             messagingTemplate.convertAndSend("/topic/online-count",
                     activeUserService.getActiveUserCount());
+            
+            // 개인방 목록 업데이트 브로드캐스트 (오프라인된 호스트의 방 제거)
+            List<RoomDto> updatedRooms = personalRoomService.getAllRooms();
+            messagingTemplate.convertAndSend("/topic/rooms/list", updatedRooms);
+            log.info("방 목록 업데이트 브로드캐스트 (사용자 해제): {} rooms", updatedRooms.size());
         }
     }
 }

@@ -72,6 +72,11 @@ public class MultiplayerController {
         // 온라인 인원 수 브로드캐스트
         messagingTemplate.convertAndSend("/topic/online-count",
                 activeUserService.getActiveUserCount());
+        
+        // 개인방 목록 업데이트 브로드캐스트 (새 호스트가 접속하면 방이 목록에 표시됨)
+        List<RoomDto> updatedRooms = personalRoomService.getAllRooms();
+        messagingTemplate.convertAndSend("/topic/rooms/list", updatedRooms);
+        log.info("방 목록 업데이트 브로드캐스트 (사용자 접속): {} rooms", updatedRooms.size());
 
         return joinDto;
     }

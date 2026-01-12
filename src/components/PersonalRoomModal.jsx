@@ -31,6 +31,22 @@ function PersonalRoomModal({
   // 이미 방 생성 시도했는지 추적
   const [hasAttemptedCreate, setHasAttemptedCreate] = useState(false);
 
+  // 실시간 방 목록 업데이트 구독
+  useEffect(() => {
+    if (currentMode !== 'browse') return;
+    
+    console.log('📡 방 목록 실시간 구독 시작');
+    const unsubscribe = multiplayerService.onRoomListUpdate((rooms) => {
+      console.log('📡 방 목록 실시간 업데이트 수신:', rooms.length, 'rooms');
+      setAvailableRooms(rooms);
+    });
+    
+    return () => {
+      console.log('📡 방 목록 실시간 구독 종료');
+      unsubscribe?.();
+    };
+  }, [currentMode]);
+
   // 초기화 - 'create' 모드면 기존 방 확인 후 방 생성 또는 입장
   useEffect(() => {
     const checkAndCreateRoom = async () => {
