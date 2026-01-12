@@ -591,7 +591,7 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
                             </div>
                         ) : (
                             rooms.map((room) => (
-                            <div key={room.roomId} className={`room-item ${room.isPlaying ? 'playing' : ''} ${room.currentPlayers >= room.maxPlayers ? 'full' : ''}`} onClick={() => handleRoomClick(room)}>
+                            <div key={room.roomId} className={`room-item ${room.isPlaying ? 'playing' : ''}`} onClick={() => handleRoomClick(room)}>
                                 <div className="room-header">
                                     <div className="room-title">
                                         {room.isLocked && <FaLock className="room-lock-icon" />}
