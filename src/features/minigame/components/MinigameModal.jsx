@@ -322,7 +322,7 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
         if (isJoiningRoom) return; // 중복 입장 방지
 
         // 게임 중인 방은 관전자로만 입장 가능 알림
-        if (room.isPlaying) {
+        if (room.playing) {
             alert('게임이 진행 중입니다. 관전자로 입장합니다.');
         }
 
@@ -591,14 +591,14 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
                             </div>
                         ) : (
                             rooms.map((room) => (
-                            <div key={room.roomId} className={`room-item ${room.isPlaying ? 'playing' : ''}`} onClick={() => handleRoomClick(room)}>
+                            <div key={room.roomId} className={`room-item ${room.playing ? 'playing' : ''}`} onClick={() => handleRoomClick(room)}>
                                 <div className="room-header">
                                     <div className="room-title">
                                         {room.isLocked && <FaLock className="room-lock-icon" />}
                                         <h3>{room.roomName}</h3>
                                     </div>
                                     <div className="room-status">
-                                        {room.isPlaying ? <span className="status-badge playing">게임 중</span> : <span className="status-badge waiting">대기 중</span>}
+                                        {room.playing ? <span className="status-badge playing">게임 중</span> : <span className="status-badge waiting">대기 중</span>}
                                     </div>
                                 </div>
                                 <div className="room-info-horizontal">
