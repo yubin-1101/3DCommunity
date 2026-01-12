@@ -66,7 +66,7 @@ class MinigameService {
           this.client.subscribe('/topic/minigame/rooms', (message) => {
             const data = JSON.parse(message.body);
 
-            if (data.action === 'create' || data.action === 'update' || data.action === 'join' || data.action === 'leave') {
+            if (data.action === 'create' || data.action === 'update' || data.action === 'join' || data.action === 'leave' || data.action === 'switchRole' || data.action === 'start') {
               this.emit('roomUpdate', data);
             } else if (data.action === 'delete') {
               this.emit('roomDelete', data);
