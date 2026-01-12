@@ -366,6 +366,9 @@ public class MinigameController {
                 room.setAction("backToWaiting");
                 room.setTimestamp(System.currentTimeMillis());
                 messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId, room);
+
+                // 로비에 있는 사람들에게도 방 상태 업데이트 브로드캐스트
+                messagingTemplate.convertAndSend("/topic/minigame/rooms", room);
             }
         }
 
