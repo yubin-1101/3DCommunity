@@ -41,6 +41,7 @@ import { ShopModal } from './features/shop';
 import { GoldChargeModal } from './features/payment';
 import { InventoryModal } from './features/inventory';
 
+
 function App() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

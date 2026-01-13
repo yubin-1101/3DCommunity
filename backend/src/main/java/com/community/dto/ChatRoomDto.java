@@ -20,6 +20,11 @@ public class ChatRoomDto {
     private LocalDateTime updatedAt;
     private Integer unreadCount;
 
+    // 메신저 앱 지원을 위한 필드
+    private String profileImagePath;
+    private String outlineImagePath;
+    private boolean isOnline;
+
     public static ChatRoomDto fromEntity(ChatRoom room, Integer unreadCount) {
         return ChatRoomDto.builder()
                 .id(room.getId())

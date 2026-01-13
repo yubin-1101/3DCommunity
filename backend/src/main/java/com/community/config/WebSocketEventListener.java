@@ -31,8 +31,8 @@ public class WebSocketEventListener {
         if (username != null && userId != null && sessionId != null) {
             log.info("Received a new web socket connection from user: {} ({})", username, userId);
 
-            // ActiveUserService에 등록
-            activeUserService.addUser(userId, sessionId);
+            // ActiveUserService에 등록 (username 포함)
+            activeUserService.addUser(userId, sessionId, username);
             
             // 접속 알림 브로드캐스트
             PlayerJoinDto joinDto = new PlayerJoinDto();

@@ -6,11 +6,13 @@ import com.community.model.SuspensionHistory;
 import com.community.model.User;
 import com.community.service.AdminService;
 import com.community.service.AdminMessageService;
+import com.community.service.ActiveUserService;
 import com.community.service.AuditLogService;
 import com.community.service.PaymentService;
 import com.community.service.StatisticsService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.Page;
@@ -18,6 +20,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +35,8 @@ public class AdminController {
     private final AdminMessageService adminMessageService;
     private final PaymentService paymentService;
     private final StatisticsService statisticsService;
+    private final ActiveUserService activeUserService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     /**
      * 대시보드 통계 조회
@@ -352,5 +357,50 @@ public class AdminController {
             @RequestBody Map<String, String> body) {
         String reason = body.getOrDefault("reason", "관리자 취소");
         return ResponseEntity.ok(paymentService.cancelPayment(orderId, reason));
+    }
+
+    // ==================== 세션 관리 API ====================
+
+    /**
+     * 활성 세션 목록 조회
+     */
+    @GetMapping("/sessions")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DEVELOPER')")
+    public ResponseEntity<List<ActiveSessionDto>> getActiveSessions() {
+        List<ActiveSessionDto> sessions = activeUserService.getAllActiveSessions();
+        return ResponseEntity.ok(sessions);
+    }
+
+    /**
+     * 특정 유저 강제 로그아웃
+     */
+    @DeleteMapping("/sessions/{userId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DEVELOPER')")
+    public ResponseEntity<?> forceLogout(@PathVariable String userId) {
+        try {
+            String sessionId = activeUserService.getSessionIdByUserId(userId);
+            if (sessionId == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("message", "해당 사용자는 현재 접속하지 않았습니다.");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            // 세션 제거
+            activeUserService.removeUserById(userId);
+
+            // 해당 사용자에게 강제 로그아웃 메시지 전송
+            Map<String, Object> logoutMessage = new HashMap<>();
+            logoutMessage.put("type", "FORCE_LOGOUT");
+            logoutMessage.put("message", "관리자에 의해 강제 로그아웃되었습니다.");
+            messagingTemplate.convertAndSendToUser(userId, "/queue/logout", logoutMessage);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "사용자가 강제 로그아웃되었습니다.");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("message", "강제 로그아웃 실패: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
     }
 }

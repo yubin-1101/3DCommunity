@@ -23,6 +23,7 @@ public class ChatService {
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ActiveUserService activeUserService;
 
     /**
      * 사용자의 대화방 목록 조회
@@ -48,14 +49,27 @@ public class ChatService {
                     int unreadCount = unreadCountMap.getOrDefault(room.getId(), 0L).intValue();
                     ChatRoomDto dto = ChatRoomDto.fromEntity(room, unreadCount);
                     
-                    // DM일 경우 상대방 이름을 제목으로 설정 (이미 JOIN FETCH 되어 있어 성능 저하 없음)
+                    // DM일 경우 상대방 정보 주입
                     if (room.getType() == ChatRoom.RoomType.DM) {
-                        String otherName = room.getParticipants().stream()
+                        User otherUser = room.getParticipants().stream()
                             .filter(p -> !p.getUser().getId().equals(userId))
-                            .map(p -> p.getUser().getNickname())
+                            .map(ChatParticipant::getUser)
                             .findFirst()
-                            .orElse("알 수 없는 사용자");
-                        dto.setTitle(otherName);
+                            .orElse(null);
+
+                        if (otherUser != null) {
+                            dto.setTitle(otherUser.getNickname());
+                            dto.setProfileImagePath(otherUser.getSelectedProfile() != null ? 
+                                    otherUser.getSelectedProfile().getImagePath() : "/resources/Profile/base-profile3.png");
+                            dto.setOutlineImagePath(otherUser.getSelectedOutline() != null ? 
+                                    otherUser.getSelectedOutline().getImagePath() : "/resources/ProfileOutline/base-outline1.png");
+                            dto.setOnline(activeUserService.isUserActive(otherUser.getId().toString()));
+                        }
+                    } else {
+                        // 그룹 방 기본 이미지/테두리 설정
+                        dto.setProfileImagePath("/resources/Profile/base-profile3.png"); // 혹은 그룹 전용 이미지
+                        dto.setOutlineImagePath("/resources/ProfileOutline/base-outline1.png");
+                        dto.setOnline(false); // 그룹은 온라인 뱃지 미표시 또는 전체 인원 중 온라인 수 등 가능
                     }
                     
                     return dto;
