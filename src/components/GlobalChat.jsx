@@ -23,7 +23,7 @@ function GlobalChat({ isVisible = true, username, userId, onlineCount: externalO
   useEffect(() => {
     if (playerJoinEvent) {
       const systemMessage = {
-        id: Date.now(),
+        id: `sys_join_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         username: 'System',
         userId: 'system',
         text: `${playerJoinEvent.username}님이 입장하셨습니다.`,
@@ -41,7 +41,7 @@ function GlobalChat({ isVisible = true, username, userId, onlineCount: externalO
   useEffect(() => {
     if (playerLeaveEvent) {
       const systemMessage = {
-        id: Date.now(),
+        id: `sys_leave_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         username: 'System',
         userId: 'system',
         text: `${playerLeaveEvent.username}님이 퇴장하셨습니다.`,
@@ -102,7 +102,7 @@ function GlobalChat({ isVisible = true, username, userId, onlineCount: externalO
   useEffect(() => {
     const handleChatMessage = (data) => {
       const newMessage = {
-        id: data.timestamp || Date.now(),
+        id: `${data.userId}_${data.timestamp || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         username: data.username,
         userId: data.userId,
         text: data.message,

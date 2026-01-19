@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './ChatRoom.css';
-import messageService from '../../services/messageService';
+import { chatAPI } from '../../services/chatService';
 import multiplayerService from '../../services/multiplayerService';
 import Popup from '../Popup';
 import ProfileAvatar from '../ProfileAvatar';
@@ -10,246 +10,208 @@ function ChatRoom({ chat, currentUserId, currentUsername, onBack, onSendMessage 
   const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [popupMessage, setPopupMessage] = useState(null);
+  const [typingUsernames, setTypingUsernames] = useState([]); // 이름 목록으로 관리
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const isTypingRef = useRef(false);
 
-  // 대화 내역 불러오기 및 WebSocket 구독
+  const roomId = chat.roomId || chat.id;
+
+  const [isConnected, setIsConnected] = useState(multiplayerService.isConnected());
+
+  // WebSocket 연결 상태 모니터링
   useEffect(() => {
+    const cleanup = multiplayerService.onConnect((connected) => {
+      setIsConnected(connected);
+    });
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
+    if (!roomId) return;
     loadMessages();
 
-    // WebSocket: DM 메시지 구독
-    const unsubscribe = multiplayerService.onDMMessage((data) => {
-      console.log('DM message received in ChatRoom:', data);
+    // WebSocket이 연결된 상태일 때만 구독
+    if (isConnected) {
+      console.log(`[ChatRoom] Subscribing to room ${roomId}`);
+      const subscription = multiplayerService.subscribeToRoom(roomId, (packet) => {
+        console.log('[ChatRoom] WebSocket Packet Received:', packet);
 
-      // 현재 채팅방의 친구로부터 온 메시지인지 확인
-      if (data.senderId === chat.friendId) {
-        const newMessage = {
-          id: data.id,
-          senderId: data.senderId,
-          senderName: data.senderUsername,
-          content: data.content,
-          timestamp: data.createdAt ? new Date(data.createdAt) : new Date(),
-          isMine: false,
-        };
+        if (packet.type === 'TYPING') {
+          handleTypingIndicator(packet.data);
+        } else if (packet.type === 'MESSAGE' || packet.data) {
+          // 일반 메시지 수신 (백엔드 구조: {type: 'MESSAGE', data: messageDto})
+          const msgData = packet.data || packet;
 
-        setMessages(prev => [...prev, newMessage]);
-      }
-    });
+          const newMessage = {
+            id: msgData.id,
+            senderId: msgData.senderId,
+            senderName: msgData.senderName || msgData.username,
+            content: msgData.content || msgData.message,
+            timestamp: msgData.createdAt ? new Date(msgData.createdAt) : new Date(),
+            isMine: String(msgData.senderId) === String(currentUserId),
+          };
 
-    // Cleanup: 이전 리스너 제거
-    return () => {
-      unsubscribe?.();
-    };
-  }, [chat.friendId]);
+          console.log('[ChatRoom] New message added to state:', newMessage);
+
+          setMessages(prev => {
+            if (prev.some(m => m.id === newMessage.id)) return prev;
+            return [...prev, newMessage];
+          });
+
+          if (String(msgData.senderId) !== String(currentUserId)) {
+            chatAPI.markAsRead(roomId, msgData.id).catch(console.error);
+          }
+        }
+      });
+
+      return () => {
+        if (subscription) subscription.unsubscribe();
+        multiplayerService.unsubscribeFromRoom(roomId);
+      };
+    }
+  }, [roomId, isConnected]);
+
+  const handleTypingIndicator = (data) => {
+    if (String(data.userId) === String(currentUserId)) return;
+
+    const typerName = data.username || "상대방";
+    if (data.isTyping) {
+      setTypingUsernames(prev => prev.includes(typerName) ? prev : [...prev, typerName]);
+    } else {
+      setTypingUsernames(prev => prev.filter(name => name !== typerName));
+    }
+  };
 
   const loadMessages = async () => {
     try {
       setLoading(true);
-      const data = await messageService.getDMHistory(chat.friendId, 50);
+      const response = await chatAPI.getMessages(roomId);
+      const data = response.data;
 
-      // 백엔드 데이터를 프론트엔드 형식으로 변환
-      const formattedMessages = data.map(msg => ({
+      setMessages(data.map(msg => ({
         id: msg.id,
-        senderId: msg.senderId,
-        senderName: msg.senderUsername,
-        content: msg.content,
-        timestamp: msg.createdAt ? new Date(msg.createdAt) : new Date(),
-        isMine: msg.senderId === currentUserId,
-      }));
+        senderId: msg.senderId || msg.userId,
+        senderName: msg.senderName || msg.username || '알 수 없음',
+        content: msg.content || msg.message,
+        timestamp: msg.createdAt ? new Date(msg.createdAt) : (msg.timestamp ? new Date(msg.timestamp) : new Date()),
+        isMine: String(msg.senderId || msg.userId) === String(currentUserId),
+      })).reverse()); // 최신순으로 오므로 역순 정렬
 
-      setMessages(formattedMessages);
-
-      // 메시지 읽음 처리 (백엔드에 알림)
-      await messageService.markMessagesAsRead(chat.friendId);
-
-      // 메시지 로드 후 하단으로 스크롤 (약간의 딜레이 후 실행)
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 100);
+      if (data.length > 0) {
+        // data[0]이 가장 최근 메시지이므로 (DESC 정렬) 0번 인덱스 사용
+        await chatAPI.markAsRead(roomId, data[0].id);
+      }
+      setTimeout(scrollToBottom, 100);
     } catch (error) {
-      console.error('메시지 로드 실패:', error);
-      // 에러 시 빈 배열로 설정
-      setMessages([]);
+      console.error('로드 실패:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // 새 메시지가 추가되면 스크롤 하단으로
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Enter 키로 채팅 입력창 포커스
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Enter 키를 누르고, 현재 다른 input이 포커스되어 있지 않으면 채팅 입력창 포커스
-      if (e.key === 'Enter' && document.activeElement !== inputRef.current) {
-        const isAnyInputFocused = document.activeElement &&
-                                  (document.activeElement.tagName === 'INPUT' ||
-                                   document.activeElement.tagName === 'TEXTAREA');
-
-        // 다른 input이 포커스되어 있지 않으면 이 채팅 입력창 포커스
-        if (!isAnyInputFocused) {
-          e.preventDefault();
-          inputRef.current?.focus();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  useEffect(() => { scrollToBottom(); }, [messages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const formatMessageTime = (date) => {
-    return date.toLocaleTimeString('ko-KR', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
-
   const handleSend = async () => {
     if (!inputMessage.trim()) return;
-
-    const messageContent = inputMessage.trim();
-
+    const content = inputMessage.trim();
     try {
-      // 백엔드에 메시지 전송
-      await onSendMessage(messageContent);
+      console.log('[ChatRoom] Sending message...');
+      // WebSocket으로 먼저 시도
+      const sent = multiplayerService.sendRoomMessage(roomId, content);
+      console.log('[ChatRoom] WebSocket send result:', sent);
 
-      // 즉시 UI에 메시지 추가 (낙관적 업데이트)
-      const newMessage = {
-        id: Date.now(), // 임시 ID
-        senderId: currentUserId,
-        senderName: currentUsername,
-        content: messageContent,
-        timestamp: new Date(),
-        isMine: true,
-      };
+      // WebSocket 연결이 안되어있거나 실패하면 REST API로 전송
+      if (!sent) {
+        console.log('[ChatRoom] Falling back to REST API');
+        await chatAPI.sendMessage(roomId, content);
+      }
 
-      setMessages(prev => [...prev, newMessage]);
+      multiplayerService.sendTypingIndicator(roomId, false);
+      isTypingRef.current = false;
       setInputMessage('');
     } catch (error) {
-      console.error('메시지 전송 실패:', error);
-      setPopupMessage('메시지 전송에 실패했습니다.');
+      console.error('[ChatRoom] Send failed:', error);
+      setPopupMessage('전송 실패');
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      e.stopPropagation(); // Prevent event from bubbling to parent handlers
-      handleSend();
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setInputMessage(value);
+
+    // 글자가 있으면 true, 없으면 false
+    const shouldBeTyping = value.length > 0;
+
+    // 상태가 변할 때만 WebSocket 메시지 전송 (스팸 방지)
+    if (shouldBeTyping !== isTypingRef.current) {
+      isTypingRef.current = shouldBeTyping;
+      multiplayerService.sendTypingIndicator(roomId, shouldBeTyping);
     }
   };
 
   return (
     <div className="chat-room-container">
-      {/* 헤더 */}
       <div className="chat-room-header">
-        <button className="back-btn" onClick={onBack}>
-          ←
-        </button>
+        <button className="back-btn" onClick={onBack}>←</button>
         <ProfileAvatar
           profileImage={{ imagePath: chat.profileImagePath }}
           outlineImage={{ imagePath: chat.outlineImagePath }}
           size={45}
-          className="chat-room-avatar-img"
         />
         <div className="chat-room-info">
-          <div className="chat-room-name">{chat.friendName}</div>
-          <div className={`chat-room-status ${chat.isOnline ? 'online' : 'offline'}`}>
-            {chat.isOnline ? '온라인' : '오프라인'}
+          <div className="chat-room-name">{chat.friendName || chat.title}</div>
+          <div className="chat-room-status">
+            {chat.type === 'GROUP' ? '그룹 채팅' : (chat.isOnline ? '온라인' : '오프라인')}
           </div>
         </div>
       </div>
 
-      {/* 메시지 목록 */}
       <div className="messages-container">
-        {loading ? (
-          <div className="empty-state">
-            <div className="empty-text">메시지를 불러오는 중...</div>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">💬</div>
-            <div className="empty-text">아직 대화 내역이 없습니다.</div>
-            <div className="empty-subtext">첫 메시지를 보내보세요!</div>
-          </div>
-        ) : (
-          messages.map((message, index) => {
-          // 날짜 구분선 표시 (전 메시지와 날짜가 다르면)
-          const showDateDivider =
-            index === 0 ||
-            new Date(messages[index - 1].timestamp).toDateString() !==
-              new Date(message.timestamp).toDateString();
-
-          return (
-            <React.Fragment key={message.id}>
-              {showDateDivider && (
-                <div className="date-divider">
-                  {new Date(message.timestamp).toLocaleDateString('ko-KR', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  })}
-                </div>
-              )}
-              <div className={`message-wrapper ${message.isMine ? 'mine' : 'theirs'}`}>
-                {!message.isMine && (
-                  <ProfileAvatar
-                    profileImage={{ imagePath: chat.profileImagePath }}
-                    outlineImage={{ imagePath: chat.outlineImagePath }}
-                    size={35}
-                    className="message-avatar-img"
-                  />
-                )}
-                <div className="message-content">
-                  {!message.isMine && (
-                    <div className="message-sender">{message.senderName}</div>
-                  )}
-                  <div className="message-bubble">
-                    <div className="message-text">{message.content}</div>
-                  </div>
-                  <div className="message-time">{formatMessageTime(message.timestamp)}</div>
-                </div>
+        {messages.map((message, index) => (
+          <div key={message.id || index} className={`message-wrapper ${message.isMine ? 'mine' : 'theirs'}`}>
+            {!message.isMine && (
+              <ProfileAvatar
+                profileImage={{ imagePath: chat.profileImagePath }}
+                outlineImage={{ imagePath: chat.outlineImagePath }}
+                size={35}
+              />
+            )}
+            <div className="message-content">
+              {!message.isMine && <div className="message-sender">{message.senderName}</div>}
+              <div className="message-bubble">
+                <div className="message-text">{message.content}</div>
               </div>
-            </React.Fragment>
-          );
-        })
-        )}
+            </div>
+          </div>
+        ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 입력 영역 */}
+      {/* 요구하신 타이핑 표시 영역 */}
+      {typingUsernames.length > 0 && (
+        <div className="typing-status-text">
+          {typingUsernames.join(', ')}님이 입력 중입니다...
+        </div>
+      )}
+
       <div className="message-input-container">
         <input
           ref={inputRef}
           type="text"
           className="message-input"
-          placeholder="메시지를 입력하세요..."
+          placeholder="메시지 입력..."
           value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={handleInputChange}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
         />
-        <button
-          className="send-btn"
-          onClick={handleSend}
-          disabled={!inputMessage.trim()}
-        >
-          ➤
-        </button>
+        <button className="send-btn" onClick={handleSend} disabled={!inputMessage.trim()}>➤</button>
       </div>
-
-      {/* 팝업 메시지 */}
-      {popupMessage && (
-        <Popup message={popupMessage} onClose={() => setPopupMessage(null)} />
-      )}
+      {popupMessage && <Popup message={popupMessage} onClose={() => setPopupMessage(null)} />}
     </div>
   );
 }

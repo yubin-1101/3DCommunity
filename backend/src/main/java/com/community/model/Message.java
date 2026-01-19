@@ -15,7 +15,8 @@ import java.time.LocalDateTime;
     @Index(name = "idx_message_type", columnList = "message_type"),
     @Index(name = "idx_message_created_at", columnList = "created_at"),
     @Index(name = "idx_message_is_deleted", columnList = "is_deleted"),
-    @Index(name = "idx_message_is_read", columnList = "is_read")
+    @Index(name = "idx_message_is_read", columnList = "is_read"),
+    @Index(name = "idx_message_chat_room", columnList = "chat_room_id")
 })
 @Data
 @Builder
@@ -37,6 +38,10 @@ public class Message {
 
     @Column(name = "room_id")
     private Long roomId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "chat_room_id")
+    private ChatRoom chatRoom;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "receiver_id")
@@ -75,6 +80,7 @@ public class Message {
     public enum MessageType {
         PLAZA,
         LOCAL_ROOM,
-        DM
+        DM,
+        CHAT_ROOM
     }
 }

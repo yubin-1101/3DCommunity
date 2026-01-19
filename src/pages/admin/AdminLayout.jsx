@@ -29,6 +29,7 @@ const AdminLayout = () => {
   const menuItems = [
     { path: '/admin', label: '대시보드', icon: '📊' },
     { path: '/admin/users', label: '사용자 관리', icon: '👥' },
+    { path: '/admin/sessions', label: '세션 관리', icon: '🔑' },
     { path: '/admin/reports', label: '신고 관리', icon: '🚨' },
     { path: '/admin/notices', label: '공지사항', icon: '📢' },
     { path: '/admin/chat-logs', label: '채팅 로그', icon: '💬' },

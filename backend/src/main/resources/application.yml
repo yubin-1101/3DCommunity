@@ -41,7 +41,7 @@ server:
 # JWT 설정
 jwt:
   secret: ${JWT_SECRET:3d-community-secret-key-please-change-this-in-production-environment-for-security}
-  expiration: ${JWT_EXPIRATION:86400000} # 24시간 (밀리초)
+  expiration: ${JWT_EXPIRATION:3600000} # 1시간 (밀리초)
 
 # 토스페이먼츠 설정
 toss:

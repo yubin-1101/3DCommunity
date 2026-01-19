@@ -17,6 +17,7 @@ import MapGamePageNew from './pages/MapGamePageNew';
 import PaymentCheckout from './features/payment/components/PaymentCheckout';
 import PaymentCallback from './features/payment/components/PaymentCallback';
 import Statistics from './pages/admin/Statistics';
+import SessionManagement from './pages/admin/SessionManagement';
 
 function AppRouter() {
   // MapGamePageNew에 전달할 핸들러들
@@ -61,6 +62,7 @@ function AppRouter() {
           <Route path="payments" element={<PaymentManagement />} />
           <Route path="statistics" element={<Statistics />} />
           <Route path="audit-logs" element={<div>감사 로그 (준비 중)</div>} />
+          <Route path="sessions" element={<SessionManagement />} />
           <Route path="profile-items" element={<ProfileItemManager />} />
           <Route path="system" element={<div>시스템 (준비 중)</div>} />
         </Route>
