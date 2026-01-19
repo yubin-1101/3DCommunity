@@ -1,0 +1,12 @@
+# Railway 배포용 Java 빌드 설정
+
+nixpacks:
+  buildCommand: >
+    ./gradlew clean build -x test 
+    -Dorg.gradle.jvmargs="-Xmx512m -XX:MaxMetaspaceSize=256m" 
+    --no-daemon --no-parallel
+  
+  # PATH 설정 (빌드 도구 포함)
+  aptPackages:
+    - openjdk-17-jdk
+    - maven

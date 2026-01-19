@@ -1,0 +1,31 @@
+{
+  "name": "3D Community",
+  "description": "3D Community Platform with Real-time Chat and Multiplayer Features",
+  "repository": "https://github.com/your-username/3DCommunity",
+  "keywords": ["3d", "community", "multiplayer", "react", "spring-boot"],
+  "services": [
+    {
+      "name": "frontend",
+      "type": "web",
+      "runtime": "nodejs",
+      "buildCommand": "npm install && npm run build",
+      "startCommand": "npm run build && node server.js",
+      "region": "us-west",
+      "environmentVariables": {
+        "NODE_ENV": "production",
+        "REACT_APP_API_URL": "$BACKEND_URL"
+      }
+    },
+    {
+      "name": "backend",
+      "type": "web",
+      "runtime": "java",
+      "buildCommand": "cd backend && ./gradlew clean build -x test",
+      "startCommand": "java -Dserver.port=$PORT -Dserver.address=0.0.0.0 -jar backend/build/libs/community-backend-0.0.1-SNAPSHOT.jar",
+      "region": "us-west",
+      "environmentVariables": {
+        "SERVER_PORT": "8080"
+      }
+    }
+  ]
+}
