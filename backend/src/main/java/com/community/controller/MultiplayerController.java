@@ -54,7 +54,7 @@ public class MultiplayerController {
         }
 
         // 사용자 등록
-        boolean added = activeUserService.addUser(userId, sessionId);
+        boolean added = activeUserService.addUser(userId, sessionId, joinDto.getUsername());
         if (!added) {
             log.error("Failed to add user {} to active users", userId);
             return null;

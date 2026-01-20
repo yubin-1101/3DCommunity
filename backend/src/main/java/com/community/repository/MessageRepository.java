@@ -24,6 +24,9 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     @Query("SELECT m FROM Message m WHERE m.messageType = 'DM' AND m.isDeleted = false AND ((m.sender.id = :userId1 AND m.receiver.id = :userId2) OR (m.sender.id = :userId2 AND m.receiver.id = :userId1)) ORDER BY m.createdAt DESC")
     List<Message> findDMBetweenUsers(@Param("userId1") Long userId1, @Param("userId2") Long userId2, Pageable pageable);
 
+    // 채팅방 메시지 조회 (최근순 + 페이징)
+    List<Message> findByChatRoomIdOrderByCreatedAtDesc(Long chatRoomId, Pageable pageable);
+
     // 특정 시간 이후 메시지 조회 (실시간 업데이트용)
     @Query("SELECT m FROM Message m WHERE m.messageType = :messageType AND m.roomId = :roomId AND m.createdAt > :since AND m.isDeleted = false ORDER BY m.createdAt ASC")
     List<Message> findRecentMessagesInRoom(@Param("messageType") MessageType messageType, @Param("roomId") Long roomId, @Param("since") LocalDateTime since);

@@ -26,7 +26,32 @@ public class WebSocketEventListener {
 
     @EventListener
     public void handleWebSocketConnectListener(SessionConnectedEvent event) {
-        log.info("Received a new web socket connection");
+        StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
+        
+        // HandshakeInterceptor에서 저장한 세션 속성 가져오기
+        String username = (String) headerAccessor.getSessionAttributes().get("username");
+        String userId = (String) headerAccessor.getSessionAttributes().get("userId");
+        String sessionId = headerAccessor.getSessionId();
+
+        if (username != null && userId != null && sessionId != null) {
+            log.info("Received a new web socket connection from user: {} ({})", username, userId);
+
+            // ActiveUserService에 등록 (username 포함)
+            activeUserService.addUser(userId, sessionId, username);
+            
+            // 접속 알림 브로드캐스트
+            PlayerJoinDto joinDto = new PlayerJoinDto();
+            joinDto.setUserId(userId);
+            joinDto.setUsername(username);
+            joinDto.setAction("join");
+            joinDto.setTimestamp(System.currentTimeMillis());
+
+            messagingTemplate.convertAndSend("/topic/players", joinDto);
+             
+            // 온라인 인원 수 업데이트
+            messagingTemplate.convertAndSend("/topic/online-count",
+                    activeUserService.getActiveUserCount());
+        }
     }
 
     @EventListener
