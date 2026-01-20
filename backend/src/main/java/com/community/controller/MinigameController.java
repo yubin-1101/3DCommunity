@@ -389,6 +389,190 @@ public class MinigameController {
             roomService.handleReactionHit(roomId, playerId, playerName,
                     event.getTimestamp() == null ? System.currentTimeMillis() : event.getTimestamp());
         }
+
+        // ===== 끝말잇기 게임 이벤트 =====
+        if ("wordChainStart".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String startWord = event.getPayload();
+            log.info("끝말잇기 게임 시작: roomId={}, startWord={}", roomId, startWord);
+            roomService.initWordChainGame(roomId, startWord);
+            roomService.startWordChainTimer(roomId);
+
+            // 게임 시작 브로드캐스트
+            GameEventDto startEvt = new GameEventDto();
+            startEvt.setRoomId(roomId);
+            startEvt.setType("wordChainStart");
+            startEvt.setPayload(startWord);
+            startEvt.setTimestamp(System.currentTimeMillis());
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", startEvt);
+        }
+
+        if ("wordChainWord".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            String word = event.getPayload();
+            log.info("끝말잇기 단어 제출: roomId={}, playerId={}, word={}", roomId, playerId, word);
+            roomService.submitWord(roomId, playerId, word);
+        }
+
+        if ("wordChainRematchRequest".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            log.info("끝말잇기 다시하기 요청: roomId={}, playerId={}", roomId, playerId);
+
+            // 다시하기 요청 브로드캐스트
+            GameEventDto rematchReqEvt = new GameEventDto();
+            rematchReqEvt.setRoomId(roomId);
+            rematchReqEvt.setType("wordChainRematchRequest");
+            rematchReqEvt.setPlayerId(playerId);
+            rematchReqEvt.setTimestamp(System.currentTimeMillis());
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", rematchReqEvt);
+
+            boolean allAgreed = roomService.addWordChainRematchRequest(roomId, playerId);
+            if (allAgreed) {
+                log.info("모든 플레이어 동의 - 끝말잇기 게임 재시작: roomId={}", roomId);
+                // 새 게임 시작
+                String[] startWords = {"사과", "바나나", "컴퓨터", "학교", "게임", "음악"};
+                String startWord = startWords[(int)(Math.random() * startWords.length)];
+                roomService.initWordChainGame(roomId, startWord);
+                roomService.startWordChainTimer(roomId);
+
+                GameEventDto rematchStartEvt = new GameEventDto();
+                rematchStartEvt.setRoomId(roomId);
+                rematchStartEvt.setType("wordChainRematchStart");
+                rematchStartEvt.setPayload(startWord);
+                rematchStartEvt.setTimestamp(System.currentTimeMillis());
+                messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", rematchStartEvt);
+            }
+        }
+
+        // ===== 스무고개 게임 이벤트 =====
+        if ("twentyQStart".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            log.info("스무고개 게임 시작: roomId={}", roomId);
+            roomService.initTwentyQGame(roomId);
+        }
+
+        if ("twentyQWordSelected".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            String payload = event.getPayload();
+            // payload format: "category:word"
+            String[] parts = payload.split(":");
+            if (parts.length >= 2) {
+                String category = parts[0];
+                String word = parts[1];
+                log.info("스무고개 단어 선택: roomId={}, category={}, word={}", roomId, category, word);
+                roomService.setTwentyQWord(roomId, playerId, category, word);
+            }
+        }
+
+        if ("twentyQQuestion".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            String playerName = event.getPlayerName();
+            String question = event.getPayload();
+            log.info("스무고개 질문: roomId={}, playerId={}, question={}", roomId, playerId, question);
+            roomService.submitTwentyQQuestion(roomId, playerId, playerName, question);
+        }
+
+        if ("twentyQAnswer".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            boolean isYes = "yes".equalsIgnoreCase(event.getPayload());
+            log.info("스무고개 답변: roomId={}, playerId={}, answer={}", roomId, playerId, isYes);
+            roomService.answerTwentyQQuestion(roomId, playerId, isYes);
+        }
+
+        if ("twentyQGuess".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            String playerName = event.getPlayerName();
+            String guess = event.getPayload();
+            log.info("스무고개 추측: roomId={}, playerId={}, guess={}", roomId, playerId, guess);
+            roomService.guessTwentyQAnswer(roomId, playerId, playerName, guess);
+        }
+
+        if ("twentyQRematchRequest".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            log.info("스무고개 다시하기 요청: roomId={}, playerId={}", roomId, playerId);
+
+            GameEventDto rematchReqEvt = new GameEventDto();
+            rematchReqEvt.setRoomId(roomId);
+            rematchReqEvt.setType("twentyQRematchRequest");
+            rematchReqEvt.setPlayerId(playerId);
+            rematchReqEvt.setTimestamp(System.currentTimeMillis());
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", rematchReqEvt);
+
+            boolean allAgreed = roomService.addTwentyQRematchRequest(roomId, playerId);
+            if (allAgreed) {
+                log.info("모든 플레이어 동의 - 스무고개 게임 재시작: roomId={}", roomId);
+                roomService.initTwentyQGame(roomId);
+
+                GameEventDto rematchStartEvt = new GameEventDto();
+                rematchStartEvt.setRoomId(roomId);
+                rematchStartEvt.setType("twentyQRematchStart");
+                rematchStartEvt.setTimestamp(System.currentTimeMillis());
+                messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", rematchStartEvt);
+            }
+        }
+
+        // ===== 라이어 게임 이벤트 =====
+        if ("liarGameStart".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            log.info("라이어 게임 시작: roomId={}", roomId);
+            roomService.initLiarGame(roomId);
+        }
+
+        if ("liarVote".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String voterId = event.getPlayerId();
+            String targetId = event.getPayload();
+            log.info("라이어 투표: roomId={}, voter={}, target={}", roomId, voterId, targetId);
+            roomService.submitLiarVote(roomId, voterId, targetId);
+        }
+
+        if ("liarGuess".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            String guess = event.getPayload();
+            log.info("라이어 키워드 추측: roomId={}, playerId={}, guess={}", roomId, playerId, guess);
+            roomService.submitLiarGuess(roomId, playerId, guess);
+        }
+
+        if ("liarChat".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            String playerName = event.getPlayerName();
+            String message = event.getPayload();
+            roomService.sendLiarChat(roomId, playerId, playerName, message);
+        }
+
+        if ("liarRematchRequest".equals(event.getType())) {
+            String roomId = event.getRoomId();
+            String playerId = event.getPlayerId();
+            log.info("라이어 다시하기 요청: roomId={}, playerId={}", roomId, playerId);
+
+            GameEventDto rematchReqEvt = new GameEventDto();
+            rematchReqEvt.setRoomId(roomId);
+            rematchReqEvt.setType("liarRematchRequest");
+            rematchReqEvt.setPlayerId(playerId);
+            rematchReqEvt.setTimestamp(System.currentTimeMillis());
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", rematchReqEvt);
+
+            boolean allAgreed = roomService.addLiarRematchRequest(roomId, playerId);
+            if (allAgreed) {
+                log.info("모든 플레이어 동의 - 라이어 게임 재시작: roomId={}", roomId);
+                roomService.initLiarGame(roomId);
+
+                GameEventDto rematchStartEvt = new GameEventDto();
+                rematchStartEvt.setRoomId(roomId);
+                rematchStartEvt.setType("liarRematchStart");
+                rematchStartEvt.setTimestamp(System.currentTimeMillis());
+                messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", rematchStartEvt);
+            }
+        }
     }
 
     /**

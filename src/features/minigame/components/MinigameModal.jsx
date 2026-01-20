@@ -6,6 +6,9 @@ import friendService from '../../../services/friendService';
 import minigameService from '../../../services/minigameService';
 import AimingGame from './AimingGame';
 import OmokGame from './OmokGame';
+import WordChainGame from './WordChainGame';
+import TwentyQuestionsGame from './TwentyQuestionsGame';
+import LiarGame from './LiarGame';
 
 function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lobby', initialRoomId = null, gpsLocation = null }) {
     const hasJoinedInitialRoom = useRef(false); // 초기 방 입장 여부 추적
@@ -471,6 +474,30 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
                 />;
             } else if (currentRoom.gameName === '에임 맞추기') {
                 gameComponent = <AimingGame
+                    roomId={currentRoom.roomId}
+                    isHost={isHost}
+                    userProfile={userProfile}
+                    players={currentRoom.players}
+                    onGameEnd={handleGameEnd}
+                />;
+            } else if (currentRoom.gameName === '끝말잇기') {
+                gameComponent = <WordChainGame
+                    roomId={currentRoom.roomId}
+                    isHost={isHost}
+                    userProfile={userProfile}
+                    players={currentRoom.players}
+                    onGameEnd={handleGameEnd}
+                />;
+            } else if (currentRoom.gameName === '스무고개') {
+                gameComponent = <TwentyQuestionsGame
+                    roomId={currentRoom.roomId}
+                    isHost={isHost}
+                    userProfile={userProfile}
+                    players={currentRoom.players}
+                    onGameEnd={handleGameEnd}
+                />;
+            } else if (currentRoom.gameName === '라이어 게임') {
+                gameComponent = <LiarGame
                     roomId={currentRoom.roomId}
                     isHost={isHost}
                     userProfile={userProfile}

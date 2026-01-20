@@ -233,6 +233,12 @@ class MinigameService {
       const data = JSON.parse(message.body);
       this.emit('gameEvent', data);
     });
+
+    // 개인별 게임 이벤트 구독 (라이어 게임 역할 배정 등)
+    this.client.subscribe('/topic/minigame/room/' + roomId + '/game/' + this.userId, (message) => {
+      const data = JSON.parse(message.body);
+      this.emit('gameEvent', data);
+    });
   }
 
   /**

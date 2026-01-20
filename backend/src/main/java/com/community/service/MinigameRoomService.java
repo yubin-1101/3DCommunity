@@ -866,4 +866,734 @@ public class MinigameRoomService {
 
         return false;
     }
+
+    // ===== 끝말잇기 게임 관련 =====
+    private final Map<String, WordChainSession> wordChainSessions = new ConcurrentHashMap<>();
+
+    private static class WordChainSession {
+        String roomId;
+        List<String> wordHistory = new ArrayList<>();
+        String currentWord;
+        int currentPlayerIndex = 0;
+        int remainingSeconds = 10;
+        java.util.concurrent.ScheduledFuture<?> timerFuture;
+        Set<String> rematchRequests = new HashSet<>();
+
+        public WordChainSession(String roomId) {
+            this.roomId = roomId;
+        }
+    }
+
+    public void initWordChainGame(String roomId, String startWord) {
+        WordChainSession session = new WordChainSession(roomId);
+        session.currentWord = startWord;
+        session.wordHistory.add(startWord);
+        session.currentPlayerIndex = 0;
+        wordChainSessions.put(roomId, session);
+        log.info("끝말잇기 게임 시작: roomId={}, startWord={}", roomId, startWord);
+    }
+
+    public void startWordChainTimer(String roomId) {
+        WordChainSession session = wordChainSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null || room == null) return;
+
+        // 기존 타이머 취소
+        if (session.timerFuture != null && !session.timerFuture.isCancelled()) {
+            session.timerFuture.cancel(false);
+        }
+
+        session.remainingSeconds = 10;
+
+        session.timerFuture = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                WordChainSession s = wordChainSessions.get(roomId);
+                if (s == null) return;
+
+                s.remainingSeconds--;
+
+                // 타이머 업데이트 브로드캐스트
+                GameEventDto timerEvt = new GameEventDto();
+                timerEvt.setRoomId(roomId);
+                timerEvt.setType("wordChainTimer");
+                timerEvt.setPayload(String.valueOf(s.remainingSeconds));
+                timerEvt.setTimestamp(System.currentTimeMillis());
+                messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", timerEvt);
+
+                // 시간 초과 시 현재 플레이어 패배
+                if (s.remainingSeconds <= 0) {
+                    if (s.timerFuture != null) {
+                        s.timerFuture.cancel(false);
+                    }
+                    handleWordChainTimeout(roomId);
+                }
+            } catch (Exception e) {
+                log.error("끝말잇기 타이머 에러: roomId={}", roomId, e);
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    private void handleWordChainTimeout(String roomId) {
+        WordChainSession session = wordChainSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null || room == null) return;
+
+        MinigamePlayerDto loser = room.getPlayers().get(session.currentPlayerIndex);
+
+        // 게임 종료 이벤트
+        GameEventDto endEvt = new GameEventDto();
+        endEvt.setRoomId(roomId);
+        endEvt.setType("wordChainEnd");
+        endEvt.setPlayerId(loser.getUserId());
+        endEvt.setPlayerName(loser.getUsername());
+        endEvt.setPayload("timeout");
+        endEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", endEvt);
+
+        endWordChainGame(roomId);
+    }
+
+    public boolean submitWord(String roomId, String playerId, String word) {
+        WordChainSession session = wordChainSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null || room == null) return false;
+
+        // 현재 턴인지 확인
+        MinigamePlayerDto currentPlayer = room.getPlayers().get(session.currentPlayerIndex);
+        if (!currentPlayer.getUserId().equals(playerId)) {
+            return false;
+        }
+
+        // 끝말잇기 규칙 검증
+        String lastChar = getLastChar(session.currentWord);
+        String firstChar = word.substring(0, 1);
+
+        // 두음법칙 적용
+        String convertedLastChar = applyDueum(lastChar);
+
+        if (!firstChar.equals(lastChar) && !firstChar.equals(convertedLastChar)) {
+            // 첫 글자가 맞지 않음
+            GameEventDto errorEvt = new GameEventDto();
+            errorEvt.setRoomId(roomId);
+            errorEvt.setType("wordChainError");
+            errorEvt.setPlayerId(playerId);
+            errorEvt.setPayload("'" + convertedLastChar + "'(으)로 시작하는 단어를 입력하세요");
+            errorEvt.setTimestamp(System.currentTimeMillis());
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", errorEvt);
+            return false;
+        }
+
+        // 이미 사용한 단어인지 확인
+        if (session.wordHistory.contains(word)) {
+            GameEventDto errorEvt = new GameEventDto();
+            errorEvt.setRoomId(roomId);
+            errorEvt.setType("wordChainError");
+            errorEvt.setPlayerId(playerId);
+            errorEvt.setPayload("이미 사용한 단어입니다");
+            errorEvt.setTimestamp(System.currentTimeMillis());
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", errorEvt);
+            return false;
+        }
+
+        // 단어 저장
+        session.wordHistory.add(word);
+        session.currentWord = word;
+
+        // 다음 플레이어로
+        session.currentPlayerIndex = (session.currentPlayerIndex + 1) % room.getPlayers().size();
+
+        // 성공 이벤트
+        GameEventDto wordEvt = new GameEventDto();
+        wordEvt.setRoomId(roomId);
+        wordEvt.setType("wordChainWord");
+        wordEvt.setPlayerId(playerId);
+        wordEvt.setPlayerName(currentPlayer.getUsername());
+        wordEvt.setPayload(word);
+        wordEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", wordEvt);
+
+        // 타이머 재시작
+        startWordChainTimer(roomId);
+
+        return true;
+    }
+
+    private String getLastChar(String word) {
+        return word.substring(word.length() - 1);
+    }
+
+    private String applyDueum(String ch) {
+        // 두음법칙 적용
+        Map<String, String> dueumMap = new HashMap<>();
+        dueumMap.put("녀", "여");
+        dueumMap.put("뇨", "요");
+        dueumMap.put("뉴", "유");
+        dueumMap.put("니", "이");
+        dueumMap.put("랴", "야");
+        dueumMap.put("려", "여");
+        dueumMap.put("례", "예");
+        dueumMap.put("료", "요");
+        dueumMap.put("류", "유");
+        dueumMap.put("리", "이");
+        dueumMap.put("라", "나");
+        dueumMap.put("래", "내");
+        dueumMap.put("로", "노");
+        dueumMap.put("뢰", "뇌");
+        dueumMap.put("루", "누");
+        dueumMap.put("르", "느");
+        return dueumMap.getOrDefault(ch, ch);
+    }
+
+    private void endWordChainGame(String roomId) {
+        WordChainSession session = wordChainSessions.remove(roomId);
+        if (session != null && session.timerFuture != null) {
+            session.timerFuture.cancel(false);
+        }
+
+        MinigameRoomDto room = rooms.get(roomId);
+        if (room != null) {
+            room.setPlaying(false);
+            for (MinigamePlayerDto player : room.getPlayers()) {
+                if (!player.isHost()) player.setReady(false);
+            }
+        }
+    }
+
+    public boolean addWordChainRematchRequest(String roomId, String playerId) {
+        WordChainSession session = wordChainSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null) {
+            session = new WordChainSession(roomId);
+            wordChainSessions.put(roomId, session);
+        }
+        if (room == null) return false;
+
+        session.rematchRequests.add(playerId);
+        if (session.rematchRequests.size() >= room.getPlayers().size()) {
+            session.rematchRequests.clear();
+            return true;
+        }
+        return false;
+    }
+
+    // ===== 스무고개 게임 관련 =====
+    private final Map<String, TwentyQSession> twentyQSessions = new ConcurrentHashMap<>();
+
+    private static class TwentyQSession {
+        String roomId;
+        String questionerId;
+        String questionerName;
+        String category;
+        String answer;
+        int questionCount = 0;
+        List<Map<String, Object>> history = new ArrayList<>();
+        String currentAsker;
+        String pendingQuestion;
+        Set<String> rematchRequests = new HashSet<>();
+
+        public TwentyQSession(String roomId) {
+            this.roomId = roomId;
+        }
+    }
+
+    public void initTwentyQGame(String roomId) {
+        MinigameRoomDto room = rooms.get(roomId);
+        if (room == null || room.getPlayers().isEmpty()) return;
+
+        TwentyQSession session = new TwentyQSession(roomId);
+        // 첫 번째 플레이어가 출제자
+        MinigamePlayerDto questioner = room.getPlayers().get(0);
+        session.questionerId = questioner.getUserId();
+        session.questionerName = questioner.getUsername();
+
+        twentyQSessions.put(roomId, session);
+        log.info("스무고개 게임 초기화: roomId={}, questioner={}", roomId, session.questionerName);
+
+        // 출제자에게 단어 선택 요청
+        GameEventDto startEvt = new GameEventDto();
+        startEvt.setRoomId(roomId);
+        startEvt.setType("twentyQStart");
+        startEvt.setPlayerId(session.questionerId);
+        startEvt.setPlayerName(session.questionerName);
+        startEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", startEvt);
+    }
+
+    public void setTwentyQWord(String roomId, String playerId, String category, String word) {
+        TwentyQSession session = twentyQSessions.get(roomId);
+        if (session == null || !session.questionerId.equals(playerId)) return;
+
+        session.category = category;
+        session.answer = word;
+
+        // 단어 선택 완료 알림
+        GameEventDto selectedEvt = new GameEventDto();
+        selectedEvt.setRoomId(roomId);
+        selectedEvt.setType("twentyQWordSelected");
+        selectedEvt.setPayload(category);
+        selectedEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", selectedEvt);
+
+        log.info("스무고개 단어 설정: roomId={}, category={}, word={}", roomId, category, word);
+    }
+
+    public void submitTwentyQQuestion(String roomId, String playerId, String playerName, String question) {
+        TwentyQSession session = twentyQSessions.get(roomId);
+        if (session == null || session.answer == null) return;
+        if (session.questionerId.equals(playerId)) return; // 출제자는 질문 불가
+
+        session.questionCount++;
+        session.pendingQuestion = question;
+        session.currentAsker = playerId;
+
+        // 질문 전송
+        GameEventDto questionEvt = new GameEventDto();
+        questionEvt.setRoomId(roomId);
+        questionEvt.setType("twentyQQuestion");
+        questionEvt.setPlayerId(playerId);
+        questionEvt.setPlayerName(playerName);
+        questionEvt.setPayload(question);
+        questionEvt.setPosition(session.questionCount);
+        questionEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", questionEvt);
+    }
+
+    public void answerTwentyQQuestion(String roomId, String playerId, boolean isYes) {
+        TwentyQSession session = twentyQSessions.get(roomId);
+        if (session == null || !session.questionerId.equals(playerId)) return;
+
+        Map<String, Object> historyItem = new HashMap<>();
+        historyItem.put("question", session.pendingQuestion);
+        historyItem.put("answer", isYes);
+        historyItem.put("questionNumber", session.questionCount);
+        session.history.add(historyItem);
+
+        // 답변 전송
+        GameEventDto answerEvt = new GameEventDto();
+        answerEvt.setRoomId(roomId);
+        answerEvt.setType("twentyQAnswer");
+        answerEvt.setPlayerId(session.currentAsker);
+        answerEvt.setPayload(isYes ? "yes" : "no");
+        answerEvt.setPosition(session.questionCount);
+        answerEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", answerEvt);
+
+        // 20개 질문 소진 시 게임 종료
+        if (session.questionCount >= 20) {
+            endTwentyQGame(roomId, null, false);
+        }
+    }
+
+    public void guessTwentyQAnswer(String roomId, String playerId, String playerName, String guess) {
+        TwentyQSession session = twentyQSessions.get(roomId);
+        if (session == null || session.answer == null) return;
+
+        boolean correct = session.answer.equalsIgnoreCase(guess.trim());
+
+        // 추측 결과 전송
+        GameEventDto guessEvt = new GameEventDto();
+        guessEvt.setRoomId(roomId);
+        guessEvt.setType("twentyQGuess");
+        guessEvt.setPlayerId(playerId);
+        guessEvt.setPlayerName(playerName);
+        guessEvt.setPayload(guess);
+        guessEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", guessEvt);
+
+        if (correct) {
+            endTwentyQGame(roomId, playerId, true);
+        }
+    }
+
+    private void endTwentyQGame(String roomId, String winnerId, boolean guessed) {
+        TwentyQSession session = twentyQSessions.get(roomId);
+        if (session == null) return;
+
+        GameEventDto endEvt = new GameEventDto();
+        endEvt.setRoomId(roomId);
+        endEvt.setType("twentyQEnd");
+        endEvt.setPlayerId(winnerId);
+        endEvt.setPayload(session.answer);
+        endEvt.setPosition(session.questionCount);
+        endEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", endEvt);
+
+        MinigameRoomDto room = rooms.get(roomId);
+        if (room != null) {
+            room.setPlaying(false);
+            for (MinigamePlayerDto player : room.getPlayers()) {
+                if (!player.isHost()) player.setReady(false);
+            }
+        }
+    }
+
+    public boolean addTwentyQRematchRequest(String roomId, String playerId) {
+        TwentyQSession session = twentyQSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null) {
+            session = new TwentyQSession(roomId);
+            twentyQSessions.put(roomId, session);
+        }
+        if (room == null) return false;
+
+        session.rematchRequests.add(playerId);
+        if (session.rematchRequests.size() >= room.getPlayers().size()) {
+            session.rematchRequests.clear();
+            twentyQSessions.remove(roomId);
+            return true;
+        }
+        return false;
+    }
+
+    // ===== 라이어 게임 관련 =====
+    private final Map<String, LiarGameSession> liarSessions = new ConcurrentHashMap<>();
+
+    private static class LiarGameSession {
+        String roomId;
+        String liarId;
+        String liarName;
+        String category;
+        String keyword;
+        Map<String, String> votes = new HashMap<>();
+        int remainingSeconds = 0;
+        java.util.concurrent.ScheduledFuture<?> timerFuture;
+        Set<String> rematchRequests = new HashSet<>();
+        boolean liarCaught = false;
+        String liarGuess = null;
+
+        public LiarGameSession(String roomId) {
+            this.roomId = roomId;
+        }
+    }
+
+    // 라이어 게임 카테고리 및 단어
+    private static final Map<String, List<String>> LIAR_WORDS = new HashMap<>();
+    static {
+        LIAR_WORDS.put("동물", Arrays.asList("사자", "호랑이", "코끼리", "기린", "펭귄", "돌고래", "독수리", "판다"));
+        LIAR_WORDS.put("음식", Arrays.asList("피자", "햄버거", "스파게티", "초밥", "김치찌개", "불고기", "떡볶이", "치킨"));
+        LIAR_WORDS.put("직업", Arrays.asList("의사", "변호사", "소방관", "요리사", "선생님", "경찰관", "프로그래머", "디자이너"));
+        LIAR_WORDS.put("장소", Arrays.asList("학교", "병원", "공원", "도서관", "영화관", "마트", "해변", "산"));
+        LIAR_WORDS.put("스포츠", Arrays.asList("축구", "농구", "야구", "테니스", "수영", "골프", "배드민턴", "탁구"));
+    }
+
+    public void initLiarGame(String roomId) {
+        MinigameRoomDto room = rooms.get(roomId);
+        if (room == null || room.getPlayers().size() < 4) return;
+
+        LiarGameSession session = new LiarGameSession(roomId);
+
+        // 랜덤으로 라이어 선택
+        int liarIndex = random.nextInt(room.getPlayers().size());
+        MinigamePlayerDto liar = room.getPlayers().get(liarIndex);
+        session.liarId = liar.getUserId();
+        session.liarName = liar.getUsername();
+
+        // 랜덤 카테고리와 단어 선택
+        List<String> categories = new ArrayList<>(LIAR_WORDS.keySet());
+        session.category = categories.get(random.nextInt(categories.size()));
+        List<String> words = LIAR_WORDS.get(session.category);
+        session.keyword = words.get(random.nextInt(words.size()));
+
+        liarSessions.put(roomId, session);
+        log.info("라이어 게임 시작: roomId={}, liar={}, category={}, keyword={}",
+                roomId, session.liarName, session.category, session.keyword);
+
+        // 각 플레이어에게 역할 전송
+        for (MinigamePlayerDto player : room.getPlayers()) {
+            GameEventDto roleEvt = new GameEventDto();
+            roleEvt.setRoomId(roomId);
+            roleEvt.setType("liarGameStart");
+            roleEvt.setPlayerId(player.getUserId());
+
+            Map<String, String> roleData = new HashMap<>();
+            roleData.put("category", session.category);
+            if (player.getUserId().equals(session.liarId)) {
+                roleData.put("role", "liar");
+                roleData.put("keyword", "???");
+            } else {
+                roleData.put("role", "citizen");
+                roleData.put("keyword", session.keyword);
+            }
+            roleEvt.setPayload(new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(roleData).toString());
+            roleEvt.setTimestamp(System.currentTimeMillis());
+
+            messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game/" + player.getUserId(), roleEvt);
+        }
+
+        // 5초 후 토론 시작
+        scheduler.schedule(() -> startLiarDiscussion(roomId), 5, TimeUnit.SECONDS);
+    }
+
+    private void startLiarDiscussion(String roomId) {
+        LiarGameSession session = liarSessions.get(roomId);
+        if (session == null) return;
+
+        session.remainingSeconds = 60;
+
+        // 토론 시작 알림
+        GameEventDto discussEvt = new GameEventDto();
+        discussEvt.setRoomId(roomId);
+        discussEvt.setType("liarDiscussionStart");
+        discussEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", discussEvt);
+
+        // 타이머 시작
+        session.timerFuture = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                LiarGameSession s = liarSessions.get(roomId);
+                if (s == null) return;
+
+                s.remainingSeconds--;
+
+                GameEventDto timerEvt = new GameEventDto();
+                timerEvt.setRoomId(roomId);
+                timerEvt.setType("liarTimer");
+                timerEvt.setPayload(String.valueOf(s.remainingSeconds));
+                timerEvt.setTimestamp(System.currentTimeMillis());
+                messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", timerEvt);
+
+                if (s.remainingSeconds <= 0) {
+                    if (s.timerFuture != null) s.timerFuture.cancel(false);
+                    startLiarVoting(roomId);
+                }
+            } catch (Exception e) {
+                log.error("라이어 타이머 에러: roomId={}", roomId, e);
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    private void startLiarVoting(String roomId) {
+        LiarGameSession session = liarSessions.get(roomId);
+        if (session == null) return;
+
+        session.votes.clear();
+        session.remainingSeconds = 15;
+
+        // 투표 시작 알림
+        GameEventDto voteEvt = new GameEventDto();
+        voteEvt.setRoomId(roomId);
+        voteEvt.setType("liarVotingStart");
+        voteEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", voteEvt);
+
+        // 투표 타이머
+        session.timerFuture = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                LiarGameSession s = liarSessions.get(roomId);
+                if (s == null) return;
+
+                s.remainingSeconds--;
+
+                GameEventDto timerEvt = new GameEventDto();
+                timerEvt.setRoomId(roomId);
+                timerEvt.setType("liarTimer");
+                timerEvt.setPayload(String.valueOf(s.remainingSeconds));
+                timerEvt.setTimestamp(System.currentTimeMillis());
+                messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", timerEvt);
+
+                if (s.remainingSeconds <= 0) {
+                    if (s.timerFuture != null) s.timerFuture.cancel(false);
+                    processLiarVotes(roomId);
+                }
+            } catch (Exception e) {
+                log.error("라이어 투표 타이머 에러: roomId={}", roomId, e);
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    public void submitLiarVote(String roomId, String voterId, String targetId) {
+        LiarGameSession session = liarSessions.get(roomId);
+        if (session == null) return;
+
+        session.votes.put(voterId, targetId);
+        log.info("라이어 투표: roomId={}, voter={}, target={}", roomId, voterId, targetId);
+
+        // 투표 현황 브로드캐스트
+        GameEventDto voteEvt = new GameEventDto();
+        voteEvt.setRoomId(roomId);
+        voteEvt.setType("liarVote");
+        voteEvt.setPlayerId(voterId);
+        voteEvt.setPayload(targetId);
+        voteEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", voteEvt);
+
+        // 모든 플레이어가 투표했는지 확인
+        MinigameRoomDto room = rooms.get(roomId);
+        if (room != null && session.votes.size() >= room.getPlayers().size()) {
+            if (session.timerFuture != null) session.timerFuture.cancel(false);
+            processLiarVotes(roomId);
+        }
+    }
+
+    private void processLiarVotes(String roomId) {
+        LiarGameSession session = liarSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null || room == null) return;
+
+        // 득표수 계산
+        Map<String, Integer> voteCounts = new HashMap<>();
+        for (String targetId : session.votes.values()) {
+            voteCounts.merge(targetId, 1, Integer::sum);
+        }
+
+        // 최다 득표자 찾기
+        String mostVotedId = null;
+        int maxVotes = 0;
+        for (Map.Entry<String, Integer> entry : voteCounts.entrySet()) {
+            if (entry.getValue() > maxVotes) {
+                maxVotes = entry.getValue();
+                mostVotedId = entry.getKey();
+            }
+        }
+
+        // 라이어가 잡혔는지 확인
+        boolean liarCaught = mostVotedId != null && mostVotedId.equals(session.liarId);
+        session.liarCaught = liarCaught;
+
+        // 투표 결과 전송
+        GameEventDto resultEvt = new GameEventDto();
+        resultEvt.setRoomId(roomId);
+        resultEvt.setType("liarVoteResult");
+        resultEvt.setPlayerId(mostVotedId);
+
+        Map<String, Object> resultData = new HashMap<>();
+        resultData.put("votedPlayerId", mostVotedId);
+        resultData.put("voteCount", maxVotes);
+        resultData.put("liarCaught", liarCaught);
+        resultData.put("liarId", session.liarId);
+        resultData.put("liarName", session.liarName);
+        resultData.put("voteCounts", voteCounts);
+
+        try {
+            resultEvt.setPayload(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(resultData));
+        } catch (Exception e) {
+            resultEvt.setPayload(resultData.toString());
+        }
+        resultEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", resultEvt);
+
+        // 라이어가 잡혔으면 키워드 맞추기 기회 (10초)
+        if (liarCaught) {
+            session.remainingSeconds = 10;
+            session.timerFuture = scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    LiarGameSession s = liarSessions.get(roomId);
+                    if (s == null) return;
+                    s.remainingSeconds--;
+
+                    GameEventDto timerEvt = new GameEventDto();
+                    timerEvt.setRoomId(roomId);
+                    timerEvt.setType("liarTimer");
+                    timerEvt.setPayload(String.valueOf(s.remainingSeconds));
+                    timerEvt.setTimestamp(System.currentTimeMillis());
+                    messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", timerEvt);
+
+                    if (s.remainingSeconds <= 0) {
+                        if (s.timerFuture != null) s.timerFuture.cancel(false);
+                        endLiarGame(roomId, false); // 라이어가 맞추지 못함
+                    }
+                } catch (Exception e) {
+                    log.error("라이어 키워드 맞추기 타이머 에러: roomId={}", roomId, e);
+                }
+            }, 1, 1, TimeUnit.SECONDS);
+        } else {
+            // 라이어가 못 잡혔으면 라이어 승리
+            endLiarGame(roomId, true);
+        }
+    }
+
+    public void submitLiarGuess(String roomId, String playerId, String guess) {
+        LiarGameSession session = liarSessions.get(roomId);
+        if (session == null || !session.liarId.equals(playerId)) return;
+
+        session.liarGuess = guess;
+        boolean correct = session.keyword.equals(guess.trim());
+
+        if (session.timerFuture != null) session.timerFuture.cancel(false);
+
+        // 추측 결과 전송
+        GameEventDto guessEvt = new GameEventDto();
+        guessEvt.setRoomId(roomId);
+        guessEvt.setType("liarGuessResult");
+        guessEvt.setPlayerId(playerId);
+
+        Map<String, Object> guessData = new HashMap<>();
+        guessData.put("guess", guess);
+        guessData.put("correct", correct);
+        guessData.put("keyword", session.keyword);
+
+        try {
+            guessEvt.setPayload(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(guessData));
+        } catch (Exception e) {
+            guessEvt.setPayload(guessData.toString());
+        }
+        guessEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", guessEvt);
+
+        // 라이어가 키워드를 맞추면 라이어 승리
+        endLiarGame(roomId, correct);
+    }
+
+    private void endLiarGame(String roomId, boolean liarWins) {
+        LiarGameSession session = liarSessions.get(roomId);
+        if (session == null) return;
+
+        if (session.timerFuture != null) session.timerFuture.cancel(false);
+
+        GameEventDto endEvt = new GameEventDto();
+        endEvt.setRoomId(roomId);
+        endEvt.setType("liarGameEnd");
+
+        Map<String, Object> endData = new HashMap<>();
+        endData.put("liarWins", liarWins);
+        endData.put("liarId", session.liarId);
+        endData.put("liarName", session.liarName);
+        endData.put("keyword", session.keyword);
+        endData.put("category", session.category);
+
+        try {
+            endEvt.setPayload(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(endData));
+        } catch (Exception e) {
+            endEvt.setPayload(endData.toString());
+        }
+        endEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", endEvt);
+
+        MinigameRoomDto room = rooms.get(roomId);
+        if (room != null) {
+            room.setPlaying(false);
+            for (MinigamePlayerDto player : room.getPlayers()) {
+                if (!player.isHost()) player.setReady(false);
+            }
+        }
+    }
+
+    public void sendLiarChat(String roomId, String playerId, String playerName, String message) {
+        GameEventDto chatEvt = new GameEventDto();
+        chatEvt.setRoomId(roomId);
+        chatEvt.setType("liarChat");
+        chatEvt.setPlayerId(playerId);
+        chatEvt.setPlayerName(playerName);
+        chatEvt.setPayload(message);
+        chatEvt.setTimestamp(System.currentTimeMillis());
+        messagingTemplate.convertAndSend("/topic/minigame/room/" + roomId + "/game", chatEvt);
+    }
+
+    public boolean addLiarRematchRequest(String roomId, String playerId) {
+        LiarGameSession session = liarSessions.get(roomId);
+        MinigameRoomDto room = rooms.get(roomId);
+        if (session == null) {
+            session = new LiarGameSession(roomId);
+            liarSessions.put(roomId, session);
+        }
+        if (room == null) return false;
+
+        session.rematchRequests.add(playerId);
+        if (session.rematchRequests.size() >= room.getPlayers().size()) {
+            session.rematchRequests.clear();
+            liarSessions.remove(roomId);
+            return true;
+        }
+        return false;
+    }
 }

@@ -27,10 +27,17 @@ public class WebSocketEventListener {
     @EventListener
     public void handleWebSocketConnectListener(SessionConnectedEvent event) {
         StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
-        
+
+        // 세션 속성이 null일 수 있음
+        var sessionAttributes = headerAccessor.getSessionAttributes();
+        if (sessionAttributes == null) {
+            log.debug("Session attributes is null, skipping connect event");
+            return;
+        }
+
         // HandshakeInterceptor에서 저장한 세션 속성 가져오기
-        String username = (String) headerAccessor.getSessionAttributes().get("username");
-        String userId = (String) headerAccessor.getSessionAttributes().get("userId");
+        String username = (String) sessionAttributes.get("username");
+        String userId = (String) sessionAttributes.get("userId");
         String sessionId = headerAccessor.getSessionId();
 
         if (username != null && userId != null && sessionId != null) {
@@ -58,8 +65,15 @@ public class WebSocketEventListener {
     public void handleWebSocketDisconnectListener(SessionDisconnectEvent event) {
         StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
 
-        String username = (String) headerAccessor.getSessionAttributes().get("username");
-        String userId = (String) headerAccessor.getSessionAttributes().get("userId");
+        // 세션 속성이 null일 수 있음
+        var sessionAttributes = headerAccessor.getSessionAttributes();
+        if (sessionAttributes == null) {
+            log.debug("Session attributes is null, skipping disconnect event");
+            return;
+        }
+
+        String username = (String) sessionAttributes.get("username");
+        String userId = (String) sessionAttributes.get("userId");
 
         if (username != null && userId != null) {
             log.info("User Disconnected : " + username);

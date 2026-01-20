@@ -422,6 +422,80 @@ MetaPlaza/
 - WebSocket 재연결 로직
 - 그림자 맵 품질 조절 (설정에서 변경 가능)
 
+## 🛠️ 문제해결 사례
+
+### 백엔드 시작 시간 최적화 (2026-01-20)
+
+#### 문제
+- Spring Boot 백엔드 시작 시간이 과도하게 오래 걸림
+- DataInitializer에서 매번 모든 사용자를 조회하여 기본 아이템 지급
+- SQL 쿼리 로깅 및 DEBUG 레벨 로깅으로 콘솔 출력 오버헤드 발생
+- WebSocket 연결 시 `NullPointerException` 발생
+
+#### 해결책
+
+**1. application.yml 최적화**
+```yaml
+spring:
+  main:
+    lazy-initialization: true  # 빈 지연 로딩 활성화
+  jpa:
+    show-sql: false            # SQL 로깅 비활성화
+    hibernate:
+      ddl-auto: none           # 스키마 검증 생략 (이미 존재하는 경우)
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 20       # 배치 처리 설정
+        order_inserts: true
+        order_updates: true
+
+logging:
+  level:
+    root: WARN                 # 로깅 레벨 최적화
+    com.community: INFO
+    org.hibernate: WARN
+```
+
+**2. DataInitializer 최적화**
+- `@Transactional` 추가로 단일 트랜잭션 처리
+- `saveAll()` 배치 처리로 개별 쿼리 감소
+- 이미 초기화된 경우 빠르게 스킵하는 로직 추가
+- `grantDefaultItemsToAllUsers()` 제거 (매번 전체 사용자 조회하던 병목)
+
+**3. WebSocketEventListener 수정**
+```java
+// 세션 속성 null 체크 추가
+var sessionAttributes = headerAccessor.getSessionAttributes();
+if (sessionAttributes == null) {
+    log.debug("Session attributes is null, skipping event");
+    return;
+}
+```
+
+**4. FriendService 트랜잭션 추가**
+```java
+@Service
+@Transactional(readOnly = true)  // 클래스 레벨 트랜잭션 추가
+public class FriendService { ... }
+```
+
+#### 결과
+| 항목 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| DataInitializer | 수 초 | ~1초 |
+| SQL 로깅 | 활성화 (콘솔 스팸) | 비활성화 |
+| 로깅 레벨 | DEBUG | WARN/INFO |
+| WebSocket 오류 | NullPointerException | 정상 작동 |
+| 친구 목록 API | 500 오류 | 정상 작동 |
+
+#### 주의사항
+- `ddl-auto: none`으로 변경 시, 새 엔티티 추가하면 DB 스키마 수동 업데이트 필요
+- 스키마 변경이 필요한 경우: `DB_DDL_AUTO=update` 환경변수 사용 또는 yml 임시 변경
+- `open-in-view: true` 유지 (Lazy Loading 문제 방지)
+
+---
+
 ### Git 브랜치 전략
 - `main`: 프로덕션 코드 (배포용)
 - `kim`: 현재 활성 개발 브랜치 (2025-12-04 기준)
