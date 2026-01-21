@@ -163,11 +163,8 @@ function MapGamePageNew({ onShowCreateRoom, onShowLobby }) {
     
     // 플레이어 입장 콜백
     const handlePlayerJoin = (data) => {
-      // 중복 로그인 체크
+      // 중복 로그인 체크 (무시)
       if (data.action === 'duplicate') {
-        if (isLoggedIn && String(data.userId) === String(userId)) {
-          alert('현재 접속 중인 아이디입니다.');
-        }
         return;
       }
 

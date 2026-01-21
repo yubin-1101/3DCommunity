@@ -35,7 +35,13 @@
       "mcp__supabase__execute_sql",
       "Bash(gradlew clean build:*)",
       "Bash(gradlew.bat clean build:*)",
-      "Bash(del \"src\\\\features\\\\minigame\\\\components\\\\ReactionRace.jsx\" \"src\\\\features\\\\minigame\\\\components\\\\ReactionRace.css\")"
+      "Bash(del \"src\\\\features\\\\minigame\\\\components\\\\ReactionRace.jsx\" \"src\\\\features\\\\minigame\\\\components\\\\ReactionRace.css\")",
+      "Bash(gradlew build:*)",
+      "Bash(cmd /c \"gradlew.bat build -x test --console=plain\")",
+      "Bash(./gradlew.bat build:*)",
+      "Bash(echo:*)",
+      "WebSearch",
+      "WebFetch(domain:krdict.korean.go.kr)"
     ],
     "deny": [],
     "ask": []
