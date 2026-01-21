@@ -16,6 +16,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 @Service
 @Slf4j
@@ -38,7 +44,15 @@ public class MinigameRoomService {
     // Omok game state
     private final Map<String, OmokGameSession> omokSessions = new ConcurrentHashMap<>();
 
-    // 한국어 단어 사전 (끝말잇기 검증용)
+    // 한국어기초사전 Open API 설정
+    private static final String KRDICT_API_KEY = "F5E1C7AE840AC60C17D459064E04F4E7";
+    private static final String KRDICT_API_URL = "https://krdict.korean.go.kr/api/search";
+
+    // 단어 검증 캐시 (API 호출 최소화)
+    private static final Set<String> validWordCache = ConcurrentHashMap.newKeySet();
+    private static final Set<String> invalidWordCache = ConcurrentHashMap.newKeySet();
+
+    // 한국어 단어 사전 (끝말잇기 검증용 - API 실패시 폴백)
     private static final Set<String> KOREAN_WORDS = new HashSet<>();
     static {
         // 가
@@ -69,8 +83,99 @@ public class MinigameRoomService {
         KOREAN_WORDS.addAll(Arrays.asList("하늘", "하느님", "하다", "하드웨어", "하반기", "하숙집", "하순", "하얀색", "하여튼", "하인", "하필", "학과", "학교", "학급", "학기", "학년", "학력", "학번", "학부모", "학비", "학생", "학습", "학용품", "학원", "학자", "학점", "한가운데", "한강", "한계", "한국", "한국어", "한국인", "한글", "한꺼번에", "한눈", "한동안", "한두", "한라산", "한마디", "한복", "한순간", "한식", "한심", "한약", "한옥", "한자", "한정", "한참", "한창", "한편", "할머니", "할아버지", "할인", "함께", "합격", "합리", "합의", "항공", "항구", "항상", "항의", "해", "해결", "해군", "해당", "해롭다", "해산물", "해석", "해소", "해수욕장", "해안", "해외", "해일", "핵심", "핸드백", "햄버거", "햇볕", "햇살", "행동", "행복", "행사", "행위", "행정", "향", "향기", "향상", "향수", "향하다", "허락", "허리", "허용", "헌법", "험하다", "헤어지다", "헬기", "현관", "현금", "현대", "현상", "현실", "현장", "현재", "현지", "혈액", "협력", "협회", "형", "형님", "형부", "형사", "형성", "형수", "형식", "형제", "형태", "형편", "혜택", "호", "호기심", "호남", "호랑이", "호박", "호수", "호실", "호텔", "호흡", "혹시", "혼나다", "혼란", "혼자", "홈페이지", "홍보", "홍수", "홍차", "화", "화가", "화나다", "화난", "화려", "화면", "화분", "화살", "화상", "화요일", "화원", "화이팅", "화재", "화장", "화장실", "화장품", "화폐", "화학", "확대", "확보", "확산", "확실", "확신", "확인", "확장", "환경", "환영", "환율", "환자", "활기", "활동", "활발", "활용", "황금", "회", "회계", "회관", "회복", "회비", "회사", "회색", "회원", "회의", "회장", "회전", "회화", "횟수", "효과", "효도", "효율", "후기", "후반", "후보", "후배", "후추", "후회", "훈련", "훨씬", "휴가", "휴게실", "휴대", "휴식", "휴일", "휴지", "흉내", "흐름", "흑백", "흑인", "흔적", "흔히", "흙", "흡수", "흥미", "흥분", "희곡", "희망", "희생", "흰색", "힘"));
     }
 
+    /**
+     * 한국어기초사전 API를 사용하여 단어 유효성 검증
+     * 캐시를 사용하여 API 호출 최소화
+     */
     private boolean isValidKoreanWord(String word) {
-        return KOREAN_WORDS.contains(word);
+        if (word == null || word.trim().isEmpty()) {
+            return false;
+        }
+
+        String trimmedWord = word.trim();
+
+        // 1. 유효 단어 캐시 확인
+        if (validWordCache.contains(trimmedWord)) {
+            return true;
+        }
+
+        // 2. 무효 단어 캐시 확인
+        if (invalidWordCache.contains(trimmedWord)) {
+            return false;
+        }
+
+        // 3. 로컬 사전 확인 (빠른 응답)
+        if (KOREAN_WORDS.contains(trimmedWord)) {
+            validWordCache.add(trimmedWord);
+            return true;
+        }
+
+        // 4. API 호출하여 검증
+        try {
+            boolean isValid = checkWordWithKrdictAPI(trimmedWord);
+            if (isValid) {
+                validWordCache.add(trimmedWord);
+                log.info("단어 '{}' API 검증 성공", trimmedWord);
+            } else {
+                invalidWordCache.add(trimmedWord);
+                log.info("단어 '{}' API 검증 실패 - 사전에 없음", trimmedWord);
+            }
+            return isValid;
+        } catch (Exception e) {
+            log.warn("API 호출 실패, 로컬 사전으로 폴백: {}", e.getMessage());
+            // API 실패시 로컬 사전으로 폴백
+            return KOREAN_WORDS.contains(trimmedWord);
+        }
+    }
+
+    /**
+     * 한국어기초사전 API 호출
+     */
+    private boolean checkWordWithKrdictAPI(String word) throws Exception {
+        String encodedWord = URLEncoder.encode(word, StandardCharsets.UTF_8.toString());
+        String apiUrl = KRDICT_API_URL + "?key=" + KRDICT_API_KEY + "&q=" + encodedWord + "&part=word&sort=dict";
+
+        URL url = new URL(apiUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(3000); // 3초 타임아웃
+        conn.setReadTimeout(3000);
+
+        int responseCode = conn.getResponseCode();
+        if (responseCode != 200) {
+            throw new RuntimeException("API 응답 오류: " + responseCode);
+        }
+
+        BufferedReader reader = new BufferedReader(
+            new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8)
+        );
+        StringBuilder response = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            response.append(line);
+        }
+        reader.close();
+        conn.disconnect();
+
+        String xmlResponse = response.toString();
+
+        // XML에서 total 값 파싱 (검색 결과 수)
+        // <total>0</total> 이면 단어 없음
+        // <total>1</total> 이상이면 단어 있음
+        if (xmlResponse.contains("<total>0</total>")) {
+            return false;
+        }
+
+        // 검색 결과가 있으면 정확한 단어 매칭 확인
+        // <word>단어</word> 태그에서 정확히 일치하는지 확인
+        String wordPattern = "<word>" + word + "</word>";
+        if (xmlResponse.contains(wordPattern)) {
+            return true;
+        }
+
+        // 부분 매칭도 허용 (API가 유사 단어도 반환하므로)
+        // total이 0이 아니고 검색어가 포함되어 있으면 유효
+        return xmlResponse.contains("<word>") && !xmlResponse.contains("<total>0</total>");
     }
 
     /**
