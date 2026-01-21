@@ -67,7 +67,9 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
       switch (evt.type) {
         case 'twentyQStart': {
           setGamePhase('selecting');
-          setQuestioner(players[0]);
+          // 출제자 정보가 evt.playerId로 전달됨
+          const questionerPlayer = players.find(p => p.userId === evt.playerId) || players[0];
+          setQuestioner(questionerPlayer);
           setQuestionHistory([]);
           setQuestionCount(0);
           setCurrentGuesserIndex(1);
@@ -76,27 +78,40 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
         }
 
         case 'twentyQWordSelected': {
-          setAnswer(evt.isQuestioner ? evt.word : '???');
-          setCategory(evt.category);
+          // 백엔드에서 payload로 카테고리만 전달 (단어는 출제자만 알고 있음)
+          const categoryFromBackend = evt.payload || selectedCategory;
+          setCategory(categoryFromBackend);
+          // 출제자 여부 체크
+          const myId = String(userProfile.id || userProfile.userId);
+          const amIQuestioner = myPlayerIndex === 0;
+          if (amIQuestioner) {
+            setAnswer(selectedWord); // 출제자는 자신이 선택한 단어 유지
+          } else {
+            setAnswer('???');
+          }
           setGamePhase('questioning');
           break;
         }
 
         case 'twentyQQuestion': {
+          // 질문 (백엔드에서 payload로 질문 내용 전달)
+          const question = evt.payload || evt.question;
           setQuestionHistory(prev => [...prev, {
             type: 'question',
             player: evt.playerName,
-            content: evt.question
+            content: question
           }]);
-          setQuestionCount(prev => prev + 1);
-          setCurrentQuestion(evt.question);
+          setQuestionCount(evt.position || questionCount + 1);
+          setCurrentQuestion(question);
           break;
         }
 
         case 'twentyQAnswer': {
+          // 답변 (백엔드에서 payload로 "yes" or "no" 전달)
+          const ans = evt.payload === 'yes' ? '예' : '아니오';
           setQuestionHistory(prev => [...prev, {
             type: 'answer',
-            content: evt.answer // 예/아니오
+            content: ans
           }]);
           // 다음 질문자로
           setCurrentGuesserIndex(prev => {
@@ -108,31 +123,28 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
         }
 
         case 'twentyQGuess': {
+          // 추측 (백엔드에서 payload로 추측 단어 전달)
+          const guess = evt.payload || evt.guess;
           setQuestionHistory(prev => [...prev, {
             type: 'guess',
             player: evt.playerName,
-            content: evt.guess,
-            correct: evt.correct
+            content: guess,
+            correct: false // 결과는 twentyQEnd에서 처리
           }]);
-
-          if (evt.correct) {
-            setGamePhase('ended');
-            setWinner(evt.playerId);
-            setAnswer(evt.actualAnswer);
-          } else {
-            // 다음 질문자로
-            setCurrentGuesserIndex(prev => {
-              const nextIdx = prev + 1;
-              return nextIdx >= players.length ? 1 : nextIdx;
-            });
-          }
+          // 다음 질문자로
+          setCurrentGuesserIndex(prev => {
+            const nextIdx = prev + 1;
+            return nextIdx >= players.length ? 1 : nextIdx;
+          });
           break;
         }
 
         case 'twentyQEnd': {
+          // 게임 종료 (백엔드에서 payload로 정답 전달)
           setGamePhase('ended');
-          setWinner(evt.winnerId);
-          setAnswer(evt.answer);
+          setWinner(evt.playerId); // 정답 맞춘 사람 또는 null
+          setAnswer(evt.payload); // 정답
+          setQuestionCount(evt.position || questionCount);
           break;
         }
 
@@ -181,11 +193,10 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
   const handleConfirmWord = () => {
     if (!selectedWord) return;
 
+    // 백엔드가 "category:word" 형식을 기대함
     minigameService.sendGameEvent(roomId, {
       type: 'twentyQWordSelected',
-      word: selectedWord,
-      category: selectedCategory,
-      questionerId: userProfile.id
+      payload: `${selectedCategory}:${selectedWord}`
     });
   };
 
@@ -195,9 +206,7 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
 
     minigameService.sendGameEvent(roomId, {
       type: 'twentyQQuestion',
-      question: currentQuestion.trim(),
-      playerId: userProfile.id,
-      playerName: userProfile.username
+      payload: currentQuestion.trim()
     });
 
     setCurrentQuestion('');
@@ -207,8 +216,7 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
   const handleAnswer = (ans) => {
     minigameService.sendGameEvent(roomId, {
       type: 'twentyQAnswer',
-      answer: ans,
-      questionerId: userProfile.id
+      payload: ans === '예' ? 'yes' : 'no'
     });
   };
 
@@ -218,9 +226,7 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
 
     minigameService.sendGameEvent(roomId, {
       type: 'twentyQGuess',
-      guess: guessInput.trim(),
-      playerId: userProfile.id,
-      playerName: userProfile.username
+      payload: guessInput.trim()
     });
 
     setGuessInput('');

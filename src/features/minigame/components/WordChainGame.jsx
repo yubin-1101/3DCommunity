@@ -41,8 +41,11 @@ const WordChainGame = ({ roomId, isHost, userProfile, players = [], onGameEnd })
   useEffect(() => {
     if (!gameStartedRef.current && isHost) {
       gameStartedRef.current = true;
+      const startWords = ['사과', '바나나', '컴퓨터', '학교', '음악', '여행', '게임', '친구'];
+      const randomWord = startWords[Math.floor(Math.random() * startWords.length)];
       minigameService.sendGameEvent(roomId, {
-        type: 'wordChainStart'
+        type: 'wordChainStart',
+        payload: randomWord
       });
     }
   }, [roomId, isHost]);
@@ -61,11 +64,10 @@ const WordChainGame = ({ roomId, isHost, userProfile, players = [], onGameEnd })
 
       switch (evt.type) {
         case 'wordChainStart': {
-          // 게임 시작 - 첫 단어 설정
-          const startWords = ['사과', '바나나', '컴퓨터', '학교', '음악', '여행', '게임', '친구'];
-          const randomWord = startWords[Math.floor(Math.random() * startWords.length)];
-          setCurrentWord(randomWord);
-          setWordHistory([{ word: randomWord, player: '시스템', isStart: true }]);
+          // 게임 시작 - 첫 단어 설정 (백엔드에서 payload로 전달)
+          const startWord = evt.payload || '사과';
+          setCurrentWord(startWord);
+          setWordHistory([{ word: startWord, player: '시스템', isStart: true }]);
           setCurrentTurnIndex(0);
           setTimerSeconds(TURN_TIME);
           setGameStatus('playing');
@@ -73,14 +75,16 @@ const WordChainGame = ({ roomId, isHost, userProfile, players = [], onGameEnd })
         }
 
         case 'wordChainWord': {
-          // 단어 입력됨
-          setCurrentWord(evt.word);
+          // 단어 입력됨 (백엔드에서 payload로 단어 전달)
+          const word = evt.payload || evt.word;
+          setCurrentWord(word);
           setWordHistory(prev => [...prev, {
-            word: evt.word,
+            word: word,
             player: evt.playerName,
             playerId: evt.playerId
           }]);
-          setCurrentTurnIndex(evt.nextTurnIndex);
+          // 다음 턴 인덱스 계산
+          setCurrentTurnIndex(prev => (prev + 1) % players.length);
           setTimerSeconds(TURN_TIME);
           setErrorMessage('');
           break;
@@ -93,17 +97,23 @@ const WordChainGame = ({ roomId, isHost, userProfile, players = [], onGameEnd })
 
         case 'wordChainError': {
           // 오류 메시지 (잘못된 단어 등)
-          if (evt.playerId === userProfile.id || evt.playerId === userProfile.userId) {
-            setErrorMessage(evt.message);
+          const myId = String(userProfile.id || userProfile.userId);
+          if (String(evt.playerId) === myId) {
+            setErrorMessage(evt.payload || evt.message || '잘못된 단어입니다');
           }
           break;
         }
 
         case 'wordChainEnd': {
-          // 게임 종료
+          // 게임 종료 (패배자 정보가 playerId로 전달됨)
           setGameStatus('ended');
-          setWinner(evt.winnerId);
-          setLoser(evt.loserId);
+          // payload가 'timeout'이면 playerId가 패배자
+          if (evt.payload === 'timeout') {
+            setLoser(evt.playerId);
+            // 승자는 패배자가 아닌 다른 플레이어
+            const winnerPlayer = players.find(p => p.userId !== evt.playerId);
+            setWinner(winnerPlayer?.userId);
+          }
           break;
         }
 
@@ -113,11 +123,10 @@ const WordChainGame = ({ roomId, isHost, userProfile, players = [], onGameEnd })
         }
 
         case 'wordChainRematchStart': {
-          // 게임 재시작
-          const startWords = ['사과', '바나나', '컴퓨터', '학교', '음악', '여행', '게임', '친구'];
-          const randomWord = startWords[Math.floor(Math.random() * startWords.length)];
-          setCurrentWord(randomWord);
-          setWordHistory([{ word: randomWord, player: '시스템', isStart: true }]);
+          // 게임 재시작 (백엔드에서 payload로 새 시작 단어 전달)
+          const startWord = evt.payload || '사과';
+          setCurrentWord(startWord);
+          setWordHistory([{ word: startWord, player: '시스템', isStart: true }]);
           setCurrentTurnIndex(0);
           setTimerSeconds(TURN_TIME);
           setGameStatus('playing');
@@ -184,13 +193,10 @@ const WordChainGame = ({ roomId, isHost, userProfile, players = [], onGameEnd })
       return;
     }
 
-    // 서버에 전송
+    // 서버에 전송 (payload로 단어 전달)
     minigameService.sendGameEvent(roomId, {
       type: 'wordChainWord',
-      word: word,
-      playerId: userProfile.id,
-      playerName: userProfile.username,
-      nextTurnIndex: (currentTurnIndex + 1) % players.length
+      payload: word
     });
 
     setInputWord('');

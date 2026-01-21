@@ -71,29 +71,36 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
 
       switch (evt.type) {
         case 'liarGameStart': {
-          // 서버에서 라이어 선정 및 제시어 배포
-          setGamePhase('reveal');
-          setLiarId(evt.liarId);
-          setIsLiar(String(evt.liarId) === String(userProfile.id) ||
-                   String(evt.liarId) === String(userProfile.userId));
-          setCategory(evt.category);
-          setKeyword(evt.isLiar ||
-                    (String(evt.liarId) === String(userProfile.id)) ||
-                    (String(evt.liarId) === String(userProfile.userId))
-                    ? '???' : evt.keyword);
-          setVotes({});
-          setHasVoted(false);
-          setVoteResult(null);
-          setWinner(null);
-          setLiarGuess('');
-          setLiarGuessResult(null);
-          setChatMessages([]);
+          // 서버에서 JSON payload로 역할 정보 전달
+          try {
+            const roleData = typeof evt.payload === 'string' ? JSON.parse(evt.payload) : evt.payload;
+            if (roleData) {
+              setGamePhase('reveal');
+              setCategory(roleData.category || '');
 
-          // 5초 후 토론 시작
-          setTimeout(() => {
-            setGamePhase('discussion');
-            setTimerSeconds(DISCUSSION_TIME);
-          }, 5000);
+              const myId = String(userProfile.id || userProfile.userId);
+              const amILiar = roleData.role === 'liar';
+              setIsLiar(amILiar);
+              setKeyword(roleData.keyword || '???');
+
+              setVotes({});
+              setHasVoted(false);
+              setVoteResult(null);
+              setWinner(null);
+              setLiarGuess('');
+              setLiarGuessResult(null);
+              setChatMessages([]);
+            }
+          } catch (e) {
+            console.error('liarGameStart payload parse error:', e);
+          }
+          break;
+        }
+
+        case 'liarDiscussionStart': {
+          // 토론 시작
+          setGamePhase('discussion');
+          setTimerSeconds(DISCUSSION_TIME);
           break;
         }
 
@@ -102,54 +109,85 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
           break;
         }
 
-        case 'liarDiscussionEnd': {
+        case 'liarVotingStart': {
+          // 투표 시작
           setGamePhase('voting');
           setTimerSeconds(VOTE_TIME);
+          setHasVoted(false);
           break;
         }
 
         case 'liarVote': {
+          // 투표 (playerId가 투표자, payload가 대상)
           setVotes(prev => ({
             ...prev,
-            [evt.voterId]: evt.targetId
+            [evt.playerId]: evt.payload
           }));
           break;
         }
 
         case 'liarVoteResult': {
-          setGamePhase('result');
-          setVoteResult(evt.votedPlayer);
+          // 투표 결과 (JSON payload)
+          try {
+            const resultData = typeof evt.payload === 'string' ? JSON.parse(evt.payload) : evt.payload;
+            setGamePhase('result');
+            setVoteResult(resultData.votedPlayerId);
+            setLiarId(resultData.liarId);
 
-          // 라이어가 지목됐는지 확인
-          if (String(evt.votedPlayer) === String(evt.actualLiar)) {
-            // 라이어 지목 성공 - 라이어에게 정답 맞출 기회
-            setWinner('pending');
-          } else {
-            // 라이어 지목 실패 - 라이어 승리
-            setWinner('liar');
-            setKeyword(evt.keyword); // 정답 공개
+            if (resultData.liarCaught) {
+              // 라이어 지목 성공 - 라이어에게 정답 맞출 기회
+              setWinner('pending');
+            } else {
+              // 라이어 지목 실패 - 라이어 승리
+              setWinner('liar');
+            }
+          } catch (e) {
+            console.error('liarVoteResult payload parse error:', e);
           }
-          setLiarId(evt.actualLiar);
           break;
         }
 
-        case 'liarGuess': {
-          // 라이어의 정답 추측 결과
-          setLiarGuessResult(evt.correct);
-          setKeyword(evt.keyword);
-          if (evt.correct) {
-            setWinner('liar');
-          } else {
-            setWinner('citizens');
+        case 'liarGuessResult': {
+          // 라이어의 정답 추측 결과 (JSON payload)
+          try {
+            const guessData = typeof evt.payload === 'string' ? JSON.parse(evt.payload) : evt.payload;
+            setLiarGuessResult(guessData.correct);
+            setKeyword(guessData.keyword);
+            if (guessData.correct) {
+              setWinner('liar');
+            } else {
+              setWinner('citizens');
+            }
+          } catch (e) {
+            console.error('liarGuessResult payload parse error:', e);
+          }
+          break;
+        }
+
+        case 'liarGameEnd': {
+          // 게임 종료 (JSON payload)
+          try {
+            const endData = typeof evt.payload === 'string' ? JSON.parse(evt.payload) : evt.payload;
+            setLiarId(endData.liarId);
+            setKeyword(endData.keyword);
+            setCategory(endData.category);
+            if (endData.liarWins) {
+              setWinner('liar');
+            } else {
+              setWinner('citizens');
+            }
+          } catch (e) {
+            console.error('liarGameEnd payload parse error:', e);
           }
           break;
         }
 
         case 'liarChat': {
+          // 채팅 메시지 (payload에 메시지)
           setChatMessages(prev => [...prev, {
             player: evt.playerName,
             playerId: evt.playerId,
-            message: evt.message
+            message: evt.payload || evt.message
           }]);
           break;
         }
@@ -209,15 +247,13 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
 
     minigameService.sendGameEvent(roomId, {
       type: 'liarVote',
-      voterId: userProfile.id,
-      targetId: targetId,
-      voterName: userProfile.username
+      payload: targetId
     });
 
     setHasVoted(true);
     setVotes(prev => ({
       ...prev,
-      [userProfile.id]: targetId
+      [userProfile.id || userProfile.userId]: targetId
     }));
   };
 
@@ -227,8 +263,7 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
 
     minigameService.sendGameEvent(roomId, {
       type: 'liarGuess',
-      guess: liarGuess.trim(),
-      playerId: userProfile.id
+      payload: liarGuess.trim()
     });
   };
 
@@ -238,9 +273,7 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
 
     minigameService.sendGameEvent(roomId, {
       type: 'liarChat',
-      message: chatInput.trim(),
-      playerId: userProfile.id,
-      playerName: userProfile.username
+      payload: chatInput.trim()
     });
 
     setChatInput('');
