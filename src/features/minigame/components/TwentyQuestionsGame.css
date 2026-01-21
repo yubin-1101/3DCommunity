@@ -426,13 +426,57 @@
 /* 대기 상태 */
 .waiting-turn, .waiting-question {
   text-align: center;
-  padding: 30px;
+  padding: 20px;
   color: #aaa;
   font-size: 1.1rem;
 }
 
-.waiting-text {
+.waiting-turn .waiting-text {
+  margin-bottom: 15px;
+}
+
+.waiting-question .waiting-text {
   margin-top: 10px;
+}
+
+/* 언제든지 정답 맞추기 가능 */
+.guess-section.always-available {
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 15px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 10px;
+}
+
+.guess-hint {
+  color: #ffd700;
+  font-size: 0.9rem;
+  margin-bottom: 5px;
+}
+
+.guess-input-group {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.guess-input-group input {
+  padding: 10px 15px;
+  font-size: 1rem;
+  border: 2px solid rgba(255, 215, 0, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  outline: none;
+  width: 200px;
+}
+
+.guess-input-group input:focus {
+  border-color: #ffd700;
+}
+
+.guess-input-group input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* 게임 종료 옵션 */

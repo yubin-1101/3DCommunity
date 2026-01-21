@@ -15,6 +15,8 @@ const WORD_CATEGORIES = {
   물건: ['컴퓨터', '스마트폰', '냉장고', '자동차', '시계', '가방', '우산', '안경', '텔레비전', '카메라']
 };
 
+const MIN_PLAYERS = 4;
+
 const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
   const [gamePhase, setGamePhase] = useState('waiting'); // waiting, reveal, discussion, voting, result
   const [liarId, setLiarId] = useState(null);
@@ -32,6 +34,7 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
   const [waitingForRematch, setWaitingForRematch] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const chatRef = useRef(null);
   const gameStartedRef = useRef(false);
 
@@ -212,6 +215,7 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
           setRematchRequests(new Set());
           setWaitingForRematch(false);
           setChatMessages([]);
+          setErrorMessage('');
           gameStartedRef.current = false;
 
           // 잠시 후 게임 시작
@@ -223,6 +227,13 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
               });
             }
           }, 1000);
+          break;
+        }
+
+        case 'liarGameError': {
+          // 에러 메시지 (인원 부족 등)
+          setErrorMessage(evt.payload || '게임을 시작할 수 없습니다.');
+          setGamePhase('waiting');
           break;
         }
 
@@ -523,6 +534,19 @@ const LiarGame = ({ roomId, isHost, userProfile, players = [], onGameEnd }) => {
         <div className="waiting-phase">
           <div className="waiting-icon">🎭</div>
           <h3>게임 준비 중...</h3>
+          <div className="player-count-info">
+            <span className={`count ${players.length >= MIN_PLAYERS ? 'enough' : 'not-enough'}`}>
+              현재 {players.length}명 / 최소 {MIN_PLAYERS}명 필요
+            </span>
+          </div>
+          {errorMessage && (
+            <div className="error-message">{errorMessage}</div>
+          )}
+          {players.length < MIN_PLAYERS && (
+            <div className="waiting-hint">
+              라이어 게임을 시작하려면 최소 4명의 플레이어가 필요합니다.
+            </div>
+          )}
         </div>
       )}
     </div>

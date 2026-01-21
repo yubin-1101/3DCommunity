@@ -656,8 +656,8 @@ function MinigameModal({ onClose, userProfile, onlinePlayers, initialMode = 'lob
     };
 
     return (
-        <div className="minigame-modal-overlay" onClick={handleClose}>
-            <div className="minigame-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="minigame-modal-overlay">
+            <div className="minigame-modal">
                 <div className="minigame-main">
                     <div className="minigame-header">
                         <h2>

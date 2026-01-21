@@ -31,6 +31,8 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
   const [selectedWord, setSelectedWord] = useState('');
   const inputRef = useRef(null);
   const gameStartedRef = useRef(false);
+  const historyRef = useRef(null);
+  const processedEventsRef = useRef(new Set()); // 중복 이벤트 방지
 
   // 플레이어 매칭 헬퍼
   const getMyPlayerIndex = () => {
@@ -59,10 +61,31 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
     }
   }, [roomId, isHost]);
 
+  // 질문 기록이 업데이트되면 스크롤 자동 내리기
+  useEffect(() => {
+    if (historyRef.current) {
+      historyRef.current.scrollTop = historyRef.current.scrollHeight;
+    }
+  }, [questionHistory]);
+
   // 게임 이벤트 리스너
   useEffect(() => {
     const handler = (evt) => {
       if (!evt || !evt.type || evt.roomId !== roomId) return;
+
+      // 중복 이벤트 방지 (timestamp 기반)
+      const eventKey = `${evt.type}-${evt.timestamp || ''}-${evt.payload || ''}`;
+      if (evt.type === 'twentyQQuestion' || evt.type === 'twentyQAnswer' || evt.type === 'twentyQGuess') {
+        if (processedEventsRef.current.has(eventKey)) {
+          return; // 이미 처리된 이벤트
+        }
+        processedEventsRef.current.add(eventKey);
+        // 오래된 이벤트 키 정리 (100개 이상이면 오래된 것 제거)
+        if (processedEventsRef.current.size > 100) {
+          const arr = Array.from(processedEventsRef.current);
+          processedEventsRef.current = new Set(arr.slice(-50));
+        }
+      }
 
       switch (evt.type) {
         case 'twentyQStart': {
@@ -342,7 +365,7 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
       {gamePhase === 'questioning' && (
         <div className="questioning-phase">
           {/* 질문 기록 */}
-          <div className="question-history">
+          <div className="question-history" ref={historyRef}>
             {questionHistory.length === 0 ? (
               <div className="no-questions">아직 질문이 없습니다. 질문을 시작하세요!</div>
             ) : (
@@ -426,10 +449,25 @@ const TwentyQuestionsGame = ({ roomId, isHost, userProfile, players = [], onGame
             </div>
           )}
 
-          {/* 다른 추측자 차례 대기 */}
+          {/* 다른 추측자 차례 대기 + 정답 맞추기 (언제든 가능) */}
           {!isQuestioner && !isMyTurnToAsk && (
             <div className="waiting-turn">
-              ⏳ {currentGuesser?.username}님의 차례입니다...
+              <div className="waiting-text">⏳ {currentGuesser?.username}님의 차례입니다...</div>
+              <div className="guess-section always-available">
+                <span className="guess-hint">💡 정답을 알겠다면 언제든지 맞춰보세요!</span>
+                <div className="guess-input-group">
+                  <input
+                    type="text"
+                    value={guessInput}
+                    onChange={(e) => setGuessInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleGuess()}
+                    placeholder="정답 입력"
+                  />
+                  <button onClick={handleGuess} disabled={!guessInput.trim()} className="guess-btn">
+                    정답 맞추기
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

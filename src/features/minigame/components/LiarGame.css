@@ -520,3 +520,39 @@
   color: #aaa;
   font-size: 1.3rem;
 }
+
+.player-count-info {
+  margin-top: 20px;
+}
+
+.player-count-info .count {
+  font-size: 1.1rem;
+  padding: 10px 20px;
+  border-radius: 20px;
+}
+
+.player-count-info .count.enough {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.player-count-info .count.not-enough {
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.2);
+}
+
+.waiting-phase .error-message {
+  margin-top: 15px;
+  padding: 15px 25px;
+  background: rgba(244, 67, 54, 0.2);
+  border: 1px solid rgba(244, 67, 54, 0.5);
+  border-radius: 10px;
+  color: #f44336;
+  font-size: 1rem;
+}
+
+.waiting-hint {
+  margin-top: 15px;
+  color: #aaa;
+  font-size: 0.95rem;
+}
