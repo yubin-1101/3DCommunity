@@ -7,6 +7,7 @@ const keyActionMap = {
   a: 'left',
   d: 'right',
   e: 'e',
+  q: 'q',
   enter: 'enter',
 };
 
@@ -19,8 +20,9 @@ export const useKeyboardControls = () => {
     shift: false,
     log: false, // Add log state
     e: false,
+    q: false, // Camera down key
     enter: false,
-    space: false, // Jump key
+    space: false, // Jump key / Camera up key
   });
 
   useEffect(() => {

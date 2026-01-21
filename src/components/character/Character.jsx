@@ -16,7 +16,13 @@ import ChatBubble from './ChatBubble';
  * - 멀티플레이어 위치 동기화
  * - 채팅 말풍선 표시
  */
-function Character({ characterRef, initialPosition, isMovementDisabled, username, userId, multiplayerService, isMapFull = false, onPositionUpdate, chatMessage, modelPath = '/resources/Ultimate Animated Character Pack - Nov 2019/glTF/BaseCharacter.gltf', isChangingAvatar = false }) {
+// 카메라 전용 계정 이메일
+const CAMERA_EMAIL = 'camera@camera.com';
+
+function Character({ characterRef, initialPosition, isMovementDisabled, username, userId, userEmail, multiplayerService, isMapFull = false, onPositionUpdate, chatMessage, modelPath = '/resources/Ultimate Animated Character Pack - Nov 2019/glTF/BaseCharacter.gltf', isChangingAvatar = false }) {
+  // 카메라 모드 체크
+  const isCameraMode = userEmail === CAMERA_EMAIL;
+
   const { scene, animations } = useGLTF(modelPath);
 
   // Clone scene with proper shadow settings
@@ -33,7 +39,7 @@ function Character({ characterRef, initialPosition, isMovementDisabled, username
 
   const { actions } = useAnimations(animations, characterRef);
 
-  const { forward, backward, left, right, shift, space } = useKeyboardControls();
+  const { forward, backward, left, right, shift, space, q } = useKeyboardControls();
   const [currentAnimation, setCurrentAnimation] = useState('none');
 
   // modelPath 변경 감지
@@ -248,6 +254,47 @@ function Character({ characterRef, initialPosition, isMovementDisabled, username
       return;
     }
 
+    // ===== 카메라 모드: 자유 비행 =====
+    if (isCameraMode) {
+      const cameraSpeed = shift ? 40 : 20; // 빠른 이동 속도
+      const direction = new THREE.Vector3();
+
+      if (forward) direction.z -= 1;
+      if (backward) direction.z += 1;
+      if (left) direction.x -= 1;
+      if (right) direction.x += 1;
+      if (space) direction.y += 1; // 위로 이동
+      if (q) direction.y -= 1; // 아래로 이동
+
+      if (direction.length() > 0) {
+        direction.normalize();
+        direction.multiplyScalar(cameraSpeed);
+
+        // 물리 엔진 무시하고 직접 위치 설정
+        const currentPos = rigidBodyRef.current.translation();
+        const newPos = {
+          x: currentPos.x + direction.x * delta,
+          y: currentPos.y + direction.y * delta,
+          z: currentPos.z + direction.z * delta
+        };
+
+        rigidBodyRef.current.setTranslation(newPos, true);
+        rigidBodyRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true); // 속도 초기화
+        modelGroupRef.current.position.set(newPos.x, newPos.y, newPos.z);
+      } else {
+        // 정지 시 중력 무시
+        rigidBodyRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      }
+
+      // 위치 업데이트 콜백
+      const rbPosition = rigidBodyRef.current.translation();
+      if (onPositionUpdate) {
+        onPositionUpdate([rbPosition.x, rbPosition.y, rbPosition.z]);
+      }
+
+      return; // 일반 이동 로직 스킵
+    }
+
     // ===== 점프 입력 처리 =====
     // 착지 상태 확인 (Y 속도가 거의 0 = 바닥에 있음)
     const currentVel = rigidBodyRef.current.linvel();
@@ -438,18 +485,20 @@ function Character({ characterRef, initialPosition, isMovementDisabled, username
         <CapsuleCollider args={[2, 1.3]} position={[0, 3.2, 0]} />
       </RigidBody>
 
-      {/* 캐릭터 모델 (RigidBody와 분리) */}
+      {/* 캐릭터 모델 (RigidBody와 분리) - 카메라 모드에서는 숨김 */}
       <group ref={modelGroupRef}>
-        <primitive
-          ref={characterRef}
-          object={clonedScene}
-          scale={2}
-          castShadow
-          receiveShadow
-        />
+        {!isCameraMode && (
+          <primitive
+            ref={characterRef}
+            object={clonedScene}
+            scale={2}
+            castShadow
+            receiveShadow
+          />
+        )}
 
-        {/* 닉네임 표시 (캐릭터 머리 위) - 3D Text with Billboard */}
-        {username && (
+        {/* 닉네임 표시 (캐릭터 머리 위) - 카메라 모드에서는 숨김 */}
+        {!isCameraMode && username && (
           <Billboard position={[0, 7, 0]} follow={true} lockX={false} lockY={false} lockZ={false}>
             <Text
               fontSize={0.6}
@@ -466,8 +515,8 @@ function Character({ characterRef, initialPosition, isMovementDisabled, username
           </Billboard>
         )}
 
-        {/* 채팅 말풍선 */}
-        {chatMessage && (
+        {/* 채팅 말풍선 - 카메라 모드에서는 숨김 */}
+        {!isCameraMode && chatMessage && (
           <ChatBubble message={chatMessage} position={[0, 8.5, 0]} duration={5000} />
         )}
       </group>

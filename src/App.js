@@ -1209,6 +1209,7 @@ function App() {
                       isMovementDisabled={shouldBlockMovement}
                       username={username}
                       userId={userId}
+                      userEmail={userProfile?.email}
                       multiplayerService={multiplayerService}
                       isMapFull={isMapFull}
                       onPositionUpdate={handleCharacterPositionUpdate}
