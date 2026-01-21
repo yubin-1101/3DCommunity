@@ -110,7 +110,7 @@ public class FriendService {
      */
     @Transactional
     public void acceptFriendRequest(Long userId, Long friendshipId) {
-        Friendship friendship = friendshipRepository.findById(friendshipId)
+        Friendship friendship = friendshipRepository.findByIdWithUsers(friendshipId)
                 .orElseThrow(() -> new RuntimeException("친구 요청을 찾을 수 없습니다."));
 
         // 요청 받은 사람만 수락 가능
@@ -139,7 +139,7 @@ public class FriendService {
      */
     @Transactional
     public void rejectFriendRequest(Long userId, Long friendshipId) {
-        Friendship friendship = friendshipRepository.findById(friendshipId)
+        Friendship friendship = friendshipRepository.findByIdWithUsers(friendshipId)
                 .orElseThrow(() -> new RuntimeException("친구 요청을 찾을 수 없습니다."));
 
         // 요청 받은 사람만 거절 가능
@@ -175,7 +175,7 @@ public class FriendService {
      */
     @Transactional
     public void removeFriend(Long userId, Long friendshipId) {
-        Friendship friendship = friendshipRepository.findById(friendshipId)
+        Friendship friendship = friendshipRepository.findByIdWithUsers(friendshipId)
                 .orElseThrow(() -> new RuntimeException("친구 관계를 찾을 수 없습니다."));
 
         // 해당 친구 관계의 당사자만 삭제 가능
