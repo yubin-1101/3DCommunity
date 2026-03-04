@@ -5,6 +5,20 @@
   # 배포할 디렉토리
   publish = "build"
 
+# API 프록시 (CORS 우회용)
+[[redirects]]
+  from = "/api/*"
+  to = "https://metaplaza-backend.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# WebSocket 프록시
+[[redirects]]
+  from = "/ws/*"
+  to = "https://metaplaza-backend.onrender.com/ws/:splat"
+  status = 200
+  force = true
+
 # SPA를 위한 리다이렉트 규칙
 [[redirects]]
   from = "/*"

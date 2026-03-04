@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: metaplaza-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://metaplaza.netlify.app
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SERVER_PORT
+        value: "8080"
